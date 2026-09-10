@@ -1,0 +1,300 @@
+name: Build client candidates
+
+# Candidates only. Real 3.1.0/3.0.4 upgrade acceptance stays in the private repo.
+# Manual prerelease delivery only; no tag trigger, production promotion or private PAT.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Candidate version (not a production release)
+        required: true
+        default: 3.2.0-rc.1
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: client-candidates-${{ github.ref }}-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+    # Reusable client checks receive no signing secrets.
+  plan:
+    if: github.ref == 'refs/heads/main'
+    needs: tests
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      version: ${{ steps.plan.outputs.version }}
+      private_baselines: ${{ steps.plan.outputs.upgrade_from }}
+      candidate_tag: ${{ steps.draft.outputs.candidate_tag }}
+      release_id: ${{ steps.draft.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.10.19'
+      - run: python -m pip install packaging==24.2
+      - name: Plan all eight native targets
+        id: plan
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TARGET: all
+        run: python tools/ci.py plan
+      - name: Create SHA-pinned candidate draft
+        id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          tag="candidate-$RELEASE_VERSION-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          # Fail on an existing tag; never move a tag to a different source commit.
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" > /dev/null
+          release_id=$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
+            -f tag_name="$tag" -f target_commitish="$GITHUB_SHA" \
+            -f name="Client candidate $RELEASE_VERSION ($GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT)" \
+            -F draft=true -F prerelease=true -f make_latest=false \
+            -f body="Candidate only. Source commit: $GITHUB_SHA. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. Publication requires all eight native targets to pass tests, frozen installation smoke and synthetic update/rollback. PENDING: real upgrades from private 3.1.0/3.0.4 binaries and private release acceptance. Synthetic rollback does not satisfy those gates. No private baseline assets are included or downloaded. This is not a stable release or production update; no live catalog or deployment is changed." \
+            --jq '.id')
+          [[ "$release_id" =~ ^[0-9]+$ ]]
+          printf 'candidate_tag=%s\nrelease_id=%s\n' "$tag" "$release_id" >> "$GITHUB_OUTPUT"
+      - name: Declare pending private acceptance
+        env:
+          CANDIDATE_VERSION: ${{ steps.plan.outputs.version }}
+          PRIVATE_BASELINES: ${{ steps.plan.outputs.upgrade_from }}
+        run: |
+          {
+            echo '## Public client candidate'
+            printf 'Candidate version: `%s`\n\n' "$CANDIDATE_VERSION"
+            echo '**Not approved for production or stable release.**'
+            echo ''
+            echo 'This workflow checks client tests, frozen installation and synthetic update/rollback only.'
+            echo 'PENDING: real native upgrades from private 3.1.0 and 3.0.4 binaries, plus private release acceptance.'
+            printf 'Baselines required by the build contract: `%s`\n\n' "$PRIVATE_BASELINES"
+            echo 'Private baseline assets are neither downloaded nor uploaded here. Synthetic rollback does not satisfy that gate.'
+            echo 'Current ZIP/checksum files go directly to a SHA-pinned draft Release, not Actions artifact storage.'
+            echo 'Only all-eight success publishes the draft as a non-latest prerelease. Any failed target leaves it a draft.'
+          } >> "$GITHUB_STEP_SUMMARY"
+  build:
+    needs: [tests, plan]
+    # Direct asset upload must run on the build runner; no large artifact transfer.
+    permissions:
+      contents: write
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+      RELEASE_TARGET: ${{ matrix.target }}
+      RELEASE_PROFILE: ${{ matrix.profile }}
+      SOFT_TRACKING_UI: ${{ matrix.ui }}
+      TRACKING_UPDATE_KEY_ID: ${{ vars.TRACKING_UPDATE_KEY_ID }}
+      PYTHONPATH: ${{ github.workspace }}/agent
+      CANDIDATE_TAG: ${{ needs.plan.outputs.candidate_tag }}
+      CANDIDATE_RELEASE_ID: ${{ needs.plan.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - id: python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+          architecture: ${{ matrix.arch }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        if: matrix.ui == 'electron'
+        with:
+          node-version: '22'
+          architecture: ${{ matrix.arch }}
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb xauth x11-utils xprintidle libx11-6 libegl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-keysyms1 libxcb-icccm4 libgtk-3-0 libnss3 libgbm1 libasound2 libxss1 libatk-bridge2.0-0
+      - name: Locked native build dependencies
+        run: python -m pip install -r agent/requirements-build.txt
+      - name: Legacy Qt dependencies
+        if: matrix.ui == 'qt'
+        run: python tools/install_qt.py
+      - name: Build and package native Electron UI
+        if: matrix.ui == 'electron'
+        env:
+          npm_config_arch: ${{ matrix.arch }}
+        run: |
+          npm ci --prefix desktop
+          npm run build --prefix desktop
+          npm test --prefix desktop
+          npm run package --prefix desktop
+      - name: Platform regression tests
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a python -m unittest discover -s agent/tests -v
+          else
+            python -m unittest discover -s agent/tests -v
+          fi
+      - name: Load repository signing secret
+        env:
+          TRACKING_UPDATE_KEY_B64: ${{ secrets.TRACKING_UPDATE_KEY_B64 }}
+        run: |
+          python -c "import os,re; assert re.fullmatch(r'[A-Za-z0-9_-]{1,80}', os.environ.get('TRACKING_UPDATE_KEY_ID','')), 'Configure repository variable TRACKING_UPDATE_KEY_ID'"
+          python tools/ci.py signing-key
+      - name: Build native installer and signed candidate
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a python tools/ci.py build
+          else
+            python tools/ci.py build
+          fi
+      - name: Frozen installer and native messaging smoke test
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a python tools/smoke_package.py "artifacts/$RELEASE_TARGET/$RELEASE_VERSION/setup-payload"
+          else
+            python tools/smoke_package.py "artifacts/$RELEASE_TARGET/$RELEASE_VERSION/setup-payload"
+          fi
+      - name: Packaging regression tests
+        run: python -m unittest discover -s tools/tests -v
+      - name: Synthetic frozen update and crash rollback (not legacy acceptance)
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a python tools/ci.py smoke-update
+          else
+            python tools/ci.py smoke-update
+          fi
+      - name: Remove temporary signing seed
+        if: always() && steps.python.outcome == 'success'
+        run: python tools/ci.py cleanup-key
+      - name: Export candidate bundle only
+        run: python tools/ci.py export
+      - name: Candidate size diagnostics
+        if: always() && steps.python.outcome == 'success'
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path('artifacts') / os.environ['RELEASE_TARGET'] / os.environ['RELEASE_VERSION'] / 'size-report.json'
+          if path.is_file():
+              report = json.loads(path.read_text(encoding='utf-8'))
+              numbers = {key: value for key, value in report.items() if type(value) is int}
+              print(json.dumps(numbers, sort_keys=True))
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as stream:
+                  stream.write('\nSize diagnostics: `' + json.dumps(numbers, sort_keys=True) + '`\n')
+          else:
+              print('No size report: inspect the first failed build step.')
+          PY
+      - name: Upload verified current ZIP and checksum to candidate draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/$CANDIDATE_RELEASE_ID" > "$RUNNER_TEMP/candidate-release.json"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$CANDIDATE_TAG" > "$RUNNER_TEMP/candidate-tag.json"
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          release = json.loads((Path(os.environ['RUNNER_TEMP']) / 'candidate-release.json').read_text(encoding='utf-8'))
+          tag = json.loads((Path(os.environ['RUNNER_TEMP']) / 'candidate-tag.json').read_text(encoding='utf-8'))
+          assert str(release['id']) == os.environ['CANDIDATE_RELEASE_ID'], 'Unexpected release ID'
+          assert release['tag_name'] == os.environ['CANDIDATE_TAG'], 'Unexpected release tag'
+          assert release['draft'] is True and release['prerelease'] is True, 'Candidate is not a draft prerelease'
+          assert tag['ref'] == 'refs/tags/' + os.environ['CANDIDATE_TAG'], 'Unexpected tag ref'
+          assert tag['object']['type'] == 'commit' and tag['object']['sha'] == os.environ['GITHUB_SHA'], 'Tag does not point to this exact commit'
+          name = 'SOFT-Tracking-' + os.environ['RELEASE_TARGET'] + '-' + os.environ['RELEASE_VERSION'] + '.zip'
+          archive = Path('artifacts/publish') / name
+          checksum = archive.with_name(name + '.sha256')
+          assert archive.is_file() and not archive.is_symlink(), 'Missing regular candidate ZIP'
+          assert 0 < archive.stat().st_size < 2 * 1024 ** 3, 'Release asset must be smaller than 2 GiB'
+          assert checksum.is_file() and not checksum.is_symlink(), 'Missing regular checksum'
+          assert 0 < checksum.stat().st_size <= 1024, 'Invalid checksum file size'
+          digest = hashlib.sha256()
+          with archive.open('rb') as stream:
+              for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                  digest.update(chunk)
+          assert checksum.read_text(encoding='ascii').strip() == digest.hexdigest() + '  ' + name, 'Candidate checksum mismatch'
+          print('Verified current candidate ZIP and SHA-256:', name, archive.stat().st_size, 'bytes')
+          PY
+          archive="artifacts/publish/SOFT-Tracking-$RELEASE_TARGET-$RELEASE_VERSION.zip"
+          gh release upload "$CANDIDATE_TAG" "$archive" "$archive.sha256" --repo "$GITHUB_REPOSITORY"
+      - name: Candidate status and outstanding acceptance
+        if: always()
+        env:
+          BUILD_STATUS: ${{ job.status }}
+        run: |
+          {
+            printf '## Candidate: %s\n\n' "$RELEASE_TARGET"
+            printf 'Version: `%s`; candidate job status: **%s**.\n\n' "$RELEASE_VERSION" "$BUILD_STATUS"
+            echo '**Private real 3.1.0/3.0.4 baseline acceptance remains PENDING, including when this job succeeds.**'
+            echo 'No stable release, promotion, private baseline upload or production deployment was performed.'
+          } >> "$GITHUB_STEP_SUMMARY"
+  publish-candidate:
+    needs: [tests, plan, build]
+    if: github.ref == 'refs/heads/main' && needs.tests.result == 'success' && needs.plan.result == 'success' && needs.build.result == 'success'
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    env:
+      CANDIDATE_TAG: ${{ needs.plan.outputs.candidate_tag }}
+      CANDIDATE_RELEASE_ID: ${{ needs.plan.outputs.release_id }}
+      RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+      EXPECTED_MATRIX: ${{ needs.plan.outputs.matrix }}
+    steps:
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.10.19'
+      - name: Verify complete eight-target draft and publish non-latest prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/$CANDIDATE_RELEASE_ID" > "$RUNNER_TEMP/candidate-release.json"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$CANDIDATE_TAG" > "$RUNNER_TEMP/candidate-tag.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          release = json.loads((root / 'candidate-release.json').read_text(encoding='utf-8'))
+          tag = json.loads((root / 'candidate-tag.json').read_text(encoding='utf-8'))
+          assert str(release['id']) == os.environ['CANDIDATE_RELEASE_ID'], 'Unexpected release ID'
+          assert release['tag_name'] == os.environ['CANDIDATE_TAG'], 'Unexpected release tag'
+          assert release['draft'] is True and release['prerelease'] is True, 'Candidate is not a draft prerelease'
+          assert tag['ref'] == 'refs/tags/' + os.environ['CANDIDATE_TAG'], 'Unexpected tag ref'
+          assert tag['object']['type'] == 'commit' and tag['object']['sha'] == os.environ['GITHUB_SHA'], 'Tag does not point to this exact commit'
+          rows = json.loads(os.environ['EXPECTED_MATRIX'])['include']
+          targets = {row['target'] for row in rows}
+          assert len(rows) == len(targets) == 8, 'All eight distinct targets are required'
+          expected = {'SOFT-Tracking-' + target + '-' + os.environ['RELEASE_VERSION'] + '.zip' + suffix
+                      for target in targets for suffix in ('', '.sha256')}
+          assets = release['assets']
+          assert len(assets) == len(expected) and {asset['name'] for asset in assets} == expected, 'Missing, duplicate or unexpected candidate assets'
+          for asset in assets:
+              assert asset['state'] == 'uploaded', 'Incomplete release asset'
+              assert type(asset['size']) is int and 0 < asset['size'] < 2 * 1024 ** 3, 'Invalid release asset size'
+              if asset['name'].endswith('.sha256'):
+                  assert asset['size'] <= 1024, 'Oversized checksum'
+          print('Verified exact source commit and all 16 current candidate assets.')
+          PY
+          url=$(gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$CANDIDATE_RELEASE_ID" \
+            -F draft=false -F prerelease=true -f make_latest=false --jq '.html_url')
+          {
+            echo '## Candidate prerelease published'
+            printf '[%s](%s)\n\nSource commit: `%s`.\n\n' "$CANDIDATE_TAG" "$url" "$GITHUB_SHA"
+            echo 'All eight native candidates passed this workflow. Assets are on the prerelease, not Actions artifact storage.'
+            echo '**PENDING: private real 3.1.0/3.0.4 upgrade acceptance. Not a stable release or production promotion.**'
+          } >> "$GITHUB_STEP_SUMMARY"

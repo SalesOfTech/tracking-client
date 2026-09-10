@@ -1,0 +1,13 @@
+pyinstaller==6.22.2
+requests==2.32.5
+PyNaCl==1.6.2
+packaging==24.2
+psutil==6.1.1; platform_machine != "ARM64"
+psutil==7.2.2; platform_machine == "ARM64"
+pystray==0.19.5
+Pillow==10.4.0; platform_machine != "ARM64"
+Pillow==11.3.0; platform_machine == "ARM64"
+pywin32==308; platform_system == "Windows" and platform_machine != "ARM64"
+pywin32==312; platform_system == "Windows" and platform_machine == "ARM64"
+pyobjc-framework-Cocoa==10.3.2; platform_system == "Darwin"
+pyobjc-framework-Quartz==10.3.2; platform_system == "Darwin"

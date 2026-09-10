@@ -1,0 +1,6 @@
+{
+  "company_id": "acme-corp",
+  "base_url": "https://api.example.com",
+  "config_endpoint": "/agent/config",
+  "events_endpoint": "/agent/events"
+}

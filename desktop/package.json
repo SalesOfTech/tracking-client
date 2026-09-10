@@ -1,0 +1,33 @@
+{
+  "name": "soft-tracking-desktop",
+  "productName": "SOFT Tracking",
+  "version": "3.2.0",
+  "private": true,
+  "type": "module",
+  "main": "main.cjs",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "test": "node --test tests/*.test.cjs",
+    "test:browser": "node tests/ui.browser.cjs",
+    "package": "node scripts/package.cjs"
+  },
+  "dependencies": {
+    "@heroui/react": "3.2.4",
+    "@heroui/styles": "3.2.4",
+    "lucide-react": "1.35.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.1.1",
+    "electron": "44.3.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vite": "8.2.2"
+  }
+}

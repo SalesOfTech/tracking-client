@@ -1,0 +1,12 @@
+{
+  "extensionName":        { "message": "Sledovač uživatelů SalesOf.Tech" },
+  "extensionDescription": { "message": "Sleduje aktivitu uživatelů na doménách společnosti a vyžaduje výběr uživatele." },
+  "popupTitle":           { "message": "Sledování" },
+  "currentUserLabel":     { "message": "Vy:" },
+  "enterKeyLabel":        { "message": "Zadejte prosím váš klíč:" },
+  "keyPlaceholder":       { "message": "Klíč" },
+  "saveKeyButton":        { "message": "Uložit" },
+  "userSaved":            { "message": "Uloženo:" },
+  "invalidKeyMessage":    { "message": "Neplatný klíč" },
+  "changeUserButton":     { "message": "Změnit uživatele" }
+}

@@ -1,0 +1,45 @@
+import sys
+import tkinter.font as tkfont
+from tkinter import ttk
+
+
+def apply_theme(root):
+    families = set(tkfont.families(root))
+    font = next((name for name in ("Segoe UI", "Helvetica Neue", "DejaVu Sans", "Arial") if name in families), "TkDefaultFont")
+    size = 11 if sys.platform == "darwin" else 10
+    tkfont.nametofont("TkDefaultFont").configure(family=font, size=size)
+    tkfont.nametofont("TkTextFont").configure(family=font, size=size)
+    style = ttk.Style(root)
+    style.theme_use("clam")
+    root.configure(background="#f4f6f7")
+    style.configure(".", font=(font, size), background="#ffffff", foreground="#263a3b")
+    style.configure("TFrame", background="#ffffff")
+    style.configure("TLabel", background="#ffffff")
+    style.configure("Title.TLabel", font=(font, 18, "bold"))
+    style.configure('Sidebar.TFrame',background='#f4f5f7')
+    style.configure('Navigation.TButton',anchor='w',padding=(16,12),background='#f4f5f7',borderwidth=0,foreground='#596773')
+    style.map('Navigation.TButton',background=[('active','#e9edf1')])
+    style.configure('Selected.Navigation.TButton',background='#e7f3fc',foreground='#137fc3')
+    style.map('Selected.Navigation.TButton',background=[('active','#deeffc')])
+    style.layout('Workspace.TNotebook.Tab',[])
+    style.configure('Workspace.TNotebook',borderwidth=0,background='white',tabmargins=0)
+    style.configure("Heading.TLabel", font=(font, 12, "bold"))
+    style.configure("Muted.TLabel", foreground="#5c6d73")
+    style.configure("Status.TLabel", foreground="#127763", font=(font, 13, "bold"))
+    style.configure("TButton", padding=(14, 9), borderwidth=1, relief="flat", background="#f3f6f8")
+    style.map("TButton", background=[("active", "#e6edf2"), ("disabled", "#f3f6f8")], foreground=[("disabled", "#8d969b")])
+    style.configure("Primary.TButton", background="#168de2", foreground="white", bordercolor="#168de2")
+    style.map("Primary.TButton", background=[("disabled", "#dce9f2"), ("active", "#1278c2")], foreground=[("disabled", "#5c6d73")])
+    style.configure("TEntry", padding=9, fieldbackground="white", bordercolor="#c9d5d9")
+    style.map("TEntry", bordercolor=[("focus", "#117766")])
+    style.configure("TCombobox", padding=7, fieldbackground="white", bordercolor="#c9d5d9")
+    style.map("TCombobox", fieldbackground=[("readonly", "white")], selectbackground=[("readonly", "white")], selectforeground=[("readonly", "#263a3b")])
+    style.configure("TCheckbutton", padding=(0, 6), background="white")
+    style.map("TCheckbutton", background=[("active", "white")])
+    style.configure("TNotebook", borderwidth=0, bordercolor="white", lightcolor="white", darkcolor="white", background="white", tabmargins=(0, 0, 0, 0))
+    style.configure("TNotebook.Tab", padding=(14, 11), background="#f3f6f8", borderwidth=0)
+    style.configure("TNotebook.Tab", bordercolor="#f3f6f8", lightcolor="#f3f6f8", darkcolor="#f3f6f8")
+    style.map("TNotebook.Tab", background=[("selected", "#ffffff")], foreground=[("selected", "#117766")], bordercolor=[("selected", "white")], lightcolor=[("selected", "white")], darkcolor=[("selected", "white")])
+    style.configure("TSeparator", background="#dce3e7")
+    style.configure("Horizontal.TProgressbar", background="#117766", troughcolor="#e5ecef", borderwidth=0, lightcolor="#117766", darkcolor="#117766")
+    return font

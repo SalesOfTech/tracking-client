@@ -1,0 +1,65 @@
+name: Client checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  client-tests:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: ${{ github.workspace }}/agent
+      PLAYWRIGHT_CHANNEL: chromium
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.10.19'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - name: Client test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb xauth libx11-6 libegl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0
+          python -m pip install -r agent/requirements-build.txt
+          python tools/install_qt.py
+          npm ci
+          npm ci --prefix desktop
+          npx playwright install --with-deps chromium
+      - name: Agent and packaging unit tests
+        run: |
+          xvfb-run -a python -m unittest discover -s agent/tests -v
+          python -m unittest discover -s tools/tests -v
+      - name: Extension and desktop unit tests
+        run: |
+          npm test
+          npm run build --prefix desktop
+          npm test --prefix desktop
+      - name: Isolated client browser fixtures
+        run: |
+          node extension/tests/collector.browser.cjs
+          node extension/tests/load.browser.cjs
+          node extension/tests/native.browser.cjs
+          node extension/tests/guide.browser.cjs
+          xvfb-run -a npm run test:browser --prefix desktop
+      - name: Client check summary
+        if: always()
+        env:
+          CHECK_STATUS: ${{ job.status }}
+        run: |
+          printf '## Client checks\n\nStatus: **%s**. See individual step logs for diagnostics.\n' "$CHECK_STATUS" >> "$GITHUB_STEP_SUMMARY"
+          echo 'No Actions artifacts are uploaded by these checks.' >> "$GITHUB_STEP_SUMMARY"

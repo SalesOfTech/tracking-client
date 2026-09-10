@@ -1,0 +1,17 @@
+SOFT Tracking uses Qt and Qt for Python (PySide), copyright The Qt Company
+and contributors, under the GNU Lesser General Public License version 3.
+The LGPL-3.0 and GPL-3.0 texts accompany this notice.
+
+Qt and PySide are unmodified, dynamically linked libraries. The exact versions
+are recorded in dependencies.txt in each release distribution. Their libraries
+are in the application's _internal directory and can be replaced by compatible
+modified versions. Reverse engineering for debugging modifications to these
+libraries is permitted.
+
+Upstream source and copyright notices:
+https://code.qt.io/cgit/qt/
+https://code.qt.io/cgit/pyside/pyside-setup.git/
+https://download.qt.io/official_releases/QtForPython/
+
+Lucide icons: copyright Lucide Contributors; ISC license is included with icons.
+Qt WebEngine and a Chromium engine are not part of the SOFT Tracking desktop UI.

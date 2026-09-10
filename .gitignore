@@ -1,0 +1,43 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+agent_config.json
+embedded_config.json
+enrollment.json
+identity.json
+*.sqlite*
+*.pem
+*.key
+!*.public.key
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv*/
+artifacts/
+distribution/private/
+venv/
+.pytest_cache/
+
+# Build outputs and release packages
+agent/build/
+agent/dist/
+desktop/dist/
+desktop/out/
+desktop/.stage/
+desktop/.stage-local-test*/
+legacy-extension-updater/build/
+legacy-extension-updater/dist/
+*.app/
+*.dmg
+*.exe
+*.zip
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

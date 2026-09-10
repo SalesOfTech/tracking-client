@@ -1,0 +1,12 @@
+{
+  "extensionName":        { "message": "SalesOf.Tech User Tracker" },
+  "extensionDescription": { "message": "Tracks user activity on company domains and requires selecting a user." },
+  "popupTitle":           { "message": "Tracking" },
+  "currentUserLabel":     { "message": "You:" },
+  "enterKeyLabel":        { "message": "Please enter your key:" },
+  "keyPlaceholder":       { "message": "Key" },
+  "saveKeyButton":        { "message": "Save" },
+  "userSaved":            { "message": "Saved:" },
+  "invalidKeyMessage":    { "message": "Invalid key" },
+  "changeUserButton":     { "message": "Change user" }
+}
