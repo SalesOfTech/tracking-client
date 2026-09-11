@@ -44,6 +44,11 @@ def _real_directory(root, parts):
     return path
 
 
+def _native_target(target):
+    # Windows stores the target verbatim in its reparse point, including slashes.
+    return target.replace('/', '\\') if os.name == 'nt' else target
+
+
 def _existing(root, parts, target):
     parent = _real_directory(root, parts[:-1])
     path = parent / parts[-1]
@@ -51,7 +56,7 @@ def _existing(root, parts, target):
         mode = path.lstat().st_mode
     except FileNotFoundError:
         return False
-    if not stat.S_ISLNK(mode) or os.readlink(path) != target:
+    if not stat.S_ISLNK(mode) or os.readlink(path) != _native_target(target):
         raise ValueError('Refusing to replace an existing Electron entry')
     return True
 
@@ -188,6 +193,7 @@ def _locked_map(root):
 
 def _create_link(root, parts, target, directory):
     _real_directory(root, parts[:-1])
+    target = _native_target(target)
     if os.symlink in os.supports_dir_fd:
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         descriptor = os.open(root, flags)

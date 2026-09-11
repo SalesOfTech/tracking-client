@@ -57,6 +57,13 @@ class ElectronLinkTests(unittest.TestCase):
         self.assert_pristine()
         self.assertFalse((self.root / links.MAP_NAME).exists())
 
+    def test_signed_posix_targets_are_converted_only_at_the_native_boundary(self):
+        target = '../Versions/Current/Example'
+        with patch.object(links.os, 'name', 'nt'):
+            self.assertEqual(links._native_target(target), r'..\Versions\Current\Example')
+        with patch.object(links.os, 'name', 'posix'):
+            self.assertEqual(links._native_target(target), target)
+
     def test_plan_resolves_dependencies_before_dependents_without_writing(self):
         plan = links.plan_links(self.root, self.document())
         self.assertEqual('/'.join(plan[0][0]), self.framework + '/Versions/Current')
@@ -69,7 +76,7 @@ class ElectronLinkTests(unittest.TestCase):
         before = (self.root / links.MAP_NAME).read_bytes()
         links.restore_links(self.root)
         for entry in self.aliases:
-            self.assertEqual(os.readlink(self.root / entry['path']), entry['target'])
+            self.assertEqual(os.readlink(self.root / entry['path']), entry['target'].replace('/', os.sep))
         self.assertEqual((self.root / self.framework / 'Example').read_bytes(), b'binary')
         self.assertEqual((self.root / self.framework / 'Resources/info').read_bytes(), b'resource')
         with patch.object(links, '_create_link', side_effect=AssertionError('Already restored')):
