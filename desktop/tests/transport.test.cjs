@@ -20,7 +20,7 @@ function start(platform) {
     return input;
   }});
   const requireMock = name => {
-    if (name === 'electron') return {app, ipcMain: {handle() {}}};
+    if (name === 'electron') return {app, nativeTheme: new EventEmitter(), ipcMain: {handle() {}}};
     if (name === 'node:fs') return {realpathSync: {native: filename => filename}, createReadStream: (...args) => {reads.push(args); return input;}};
     if (name === './protocol.cjs') return require('../protocol.cjs');
     return require(name);

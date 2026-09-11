@@ -17,6 +17,16 @@ test('renderer may only issue narrow, typed commands', () => {
   assert.equal(validate('enroll', {code: 'a'.repeat(32), key: 'b'.repeat(64)}).action, 'enroll');
 });
 
+test('employee switch, admin stop and browser pages cannot supply arbitrary authority or URLs', () => {
+  assert.equal(validate('switch-employee', {key: 'b'.repeat(64)}).action, 'switch-employee');
+  for (const input of [{key: 'b'.repeat(64), code: 'c'.repeat(32)}, {key: 'wrong'}]) assert.throws(() => validate('switch-employee', input));
+  assert.equal(validate('stop-agent').action, 'stop-agent');
+  assert.throws(() => validate('stop-agent', {authorized: true}));
+  for (const browser of ['Chrome', 'Edge', 'Yandex', 'Opera', 'Brave', 'Vivaldi', 'Chromium', 'Firefox']) assert.equal(validate('browser-page', {browser}).input.browser, browser);
+  for (const input of [{browser: 'Chrome', url: 'file:///etc/passwd'}, {browser: 'cmd.exe'}, {browser: 'chrome://extensions'}]) assert.throws(() => validate('browser-page', input));
+  for (const theme of ['system', 'light', 'dark']) assert.throws(() => validate('preferences', {language: 'ru', theme}));
+});
+
 function sourceModule(filename, globals = {}) {
   const ts = require('typescript'), vm = require('node:vm');
   const source = fs.readFileSync(path.join(__dirname, '../src', filename), 'utf8');

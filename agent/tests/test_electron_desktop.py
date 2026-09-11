@@ -12,6 +12,23 @@ from agent_tracker.electron_desktop import Controller, serve, validate
 
 
 class ElectronControllerTests(unittest.TestCase):
+    def test_installer_opens_only_the_installed_extension_not_its_guide_bundle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'bundle/guide').mkdir(parents=True)
+            controller = Controller(bundle=root / 'bundle')
+            with self.assertRaisesRegex(ValueError, 'package_missing'):
+                controller.open('extension')
+            folder = root / 'installed/extension'
+            folder.mkdir(parents=True)
+            controller.launcher = root / 'installed/SoftTracking.exe'
+            with patch('agent_tracker.electron_desktop.os.startfile', create=True) as open_file, patch('agent_tracker.electron_desktop.subprocess.Popen') as spawn:
+                controller.open('extension')
+                if open_file.called:
+                    open_file.assert_called_once_with(str(folder))
+                else:
+                    self.assertEqual(spawn.call_args.args[0][-1], str(folder))
+
     def test_only_explicit_health_checks_expose_native_startup_diagnostics(self):
         for health in (False, True):
             child = Mock()
@@ -110,8 +127,11 @@ class ElectronControllerTests(unittest.TestCase):
                 self.assertNotIn('must-not-leak', status)
                 self.assertNotIn(client.device['device_secret'], status)
                 self.assertNotIn('device_secret', status)
-                controller.command('preferences', {'theme': 'dark', 'language': 'ru'})
-                self.assertEqual(client.state.get('theme'), 'dark')
+                client.state.set('theme', 'dark')
+                with self.assertRaises(ValueError):
+                    controller.command('preferences', {'theme': 'dark', 'language': 'ru'})
+                controller.command('preferences', {'language': 'ru'})
+                self.assertEqual(Controller(client).snapshot()['theme'], 'system')
                 self.assertEqual(controller.snapshot()['language'], 'ru')
             finally:
                 client.close()
@@ -123,6 +143,39 @@ class ElectronControllerTests(unittest.TestCase):
                 client.state.set('identity', {'company_id': 36})
                 with self.assertRaisesRegex(ValueError, 'already_registered'):
                     Controller(client).command('enroll', {'code': 'a'*32, 'key': 'b'*64})
+            finally:
+                client.close()
+
+    def test_switch_uses_worker_barrier_and_never_returns_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client = Client(Path(directory))
+            try:
+                client.state.set('identity', {'company_id': 36, 'user_id': 5})
+                worker = Mock()
+                controller = Controller(client, code='a'*32, worker=worker)
+                controller.command('switch-employee', {'key': 'b'*64})
+                controller.job.join()
+                worker.switch_employee.assert_called_once_with('a'*32, 'b'*64)
+                self.assertEqual(controller.message, 'employee_changed')
+                self.assertNotIn('b'*64, json.dumps(controller.snapshot()))
+                self.assertFalse(controller.exit_requested)
+            finally:
+                client.close()
+
+    def test_stop_never_accepts_renderer_authorization_and_cancel_keeps_worker_running(self):
+        with self.assertRaises(ValueError):
+            validate('stop-agent', {'authorized': True})
+        with tempfile.TemporaryDirectory() as directory:
+            client = Client(Path(directory))
+            try:
+                for authorized, state in [(False, 'cancelled'), (True, 'authorized')]:
+                    worker = Mock()
+                    controller = Controller(client, worker=worker)
+                    controller.admin.request_stop = Mock(return_value={'authorized': authorized, 'state': state})
+                    controller.command('stop-agent', {})
+                    controller.job.join()
+                    self.assertEqual(controller.exit_requested, authorized)
+                    self.assertEqual(worker.request_graceful_stop.call_count, int(authorized))
             finally:
                 client.close()
 
@@ -140,6 +193,22 @@ class ElectronControllerTests(unittest.TestCase):
             self.assertEqual(view['error'], 'setup_failed')
             self.assertNotIn('private-network-token', json.dumps(view))
             self.assertIn('установку', view['errorText'])
+
+    def test_authorized_stop_does_not_exit_when_session_checkpoint_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client = Client(Path(directory))
+            try:
+                worker = Mock()
+                worker.request_graceful_stop.side_effect = OSError('private filesystem detail')
+                controller = Controller(client, worker=worker)
+                controller.admin.request_stop = Mock(return_value={'authorized': True, 'state': 'authorized'})
+                controller.command('stop-agent', {})
+                controller.job.join()
+                self.assertFalse(controller.exit_requested)
+                self.assertEqual(controller.error, 'stop_pending_activity')
+                self.assertNotIn('private filesystem detail', json.dumps(controller.snapshot()))
+            finally:
+                client.close()
 
     def test_health_mode_never_enrolls_installs_or_retries(self):
         with tempfile.TemporaryDirectory() as directory:

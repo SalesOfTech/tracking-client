@@ -151,6 +151,43 @@ class ReleaseTests(unittest.TestCase):
             install(bundle,root,'b'*32,integrate=False,company_resolver=lambda code:32 if code=='a'*32 else 36)
         self.assertEqual('a'*32,read_json(root/'enrollment.json')['company_code'])
 
+    def test_fresh_install_registers_real_startup_with_stable_launcher(self):
+        from agent_tracker import integration
+        bundle, _ = self.installer_fixture()
+        root = Path(self.tmp.name) / 'fresh-install'
+        startup = Path(self.tmp.name) / 'login' / 'soft.desktop'
+        with patch('agent_tracker.installer.protect_workspace'), patch('agent_tracker.installer.register_host'), \
+                patch('agent_tracker.installer.shortcuts'), patch.object(integration, '_system', return_value='linux'), \
+                patch.object(integration, '_startup_path', return_value=startup):
+            launcher = install(bundle, root, 'a'*32)
+            self.assertTrue(integration.autostart_status(launcher)['registered'])
+            self.assertIn('--autostart', startup.read_text())
+
+    def test_same_version_setup_repairs_startup_without_stopping_or_replacing_data(self):
+        from agent_tracker import integration
+        bundle, root = self.installer_fixture()
+        startup = Path(self.tmp.name) / 'login' / 'soft.desktop'
+        before = (root/'enrollment.json').read_bytes(), (root/'current.json').read_bytes()
+        with patch.object(integration, '_system', return_value='linux'), \
+                patch.object(integration, '_startup_path', return_value=startup), \
+                patch('agent_tracker.installer.stopped_supervisor') as stop, SingleInstance(root/'supervisor.lock'):
+            launcher = install(bundle, root, 'a'*32)
+            self.assertTrue(integration.autostart_status(launcher)['registered'])
+            stop.assert_not_called()
+        self.assertEqual(before, ((root/'enrollment.json').read_bytes(), (root/'current.json').read_bytes()))
+
+    def test_existing_upgrade_registers_startup_but_nonintegrated_setup_does_not(self):
+        bundle, root = self.installer_fixture()
+        with patch('agent_tracker.installer.autostart') as startup:
+            install(bundle, root, 'a'*32, integrate=False)
+            startup.assert_not_called()
+            archive, _, envelope = self.package('3.0.2')
+            (bundle/'release.zip').write_bytes(archive.read_bytes())
+            atomic_json(bundle/'manifest.json', envelope)
+            launcher = install(bundle, root, 'a'*32, health_check=lambda *_: None)
+            startup.assert_called_once_with(launcher, True)
+        self.assertEqual(read_json(root/'current.json')['version'], '3.0.2')
+
     def test_repeated_download_opens_running_installation_without_replacing_data(self):
         bundle,root=self.installer_fixture()
         state=ClientState(root.parent)

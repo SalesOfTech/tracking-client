@@ -1,0 +1,135 @@
+name: Accept and publish stable client
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_tag:
+        description: Exact green candidate tag (candidate-3.2.0-RUN_ID-ATTEMPT)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  deployments: read
+
+concurrency:
+  group: stable-client-3.2.0
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    environment: tracking-release-acceptance
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    outputs:
+      plan: ${{ steps.prepare.outputs.plan }}
+      matrix: ${{ steps.prepare.outputs.matrix }}
+      candidate_sha: ${{ steps.prepare.outputs.candidate_sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.10.19'
+      - run: python -m pip install requests==2.32.5 PyNaCl==1.6.2 packaging==24.2
+      - name: Validate protected dispatch, candidate run and exact public artifact set
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+          TRACKING_TRUSTED_UPDATE_KEYS: ${{ vars.TRACKING_TRUSTED_UPDATE_KEYS }}
+        run: python tools/accept_release.py prepare
+      - name: Remove temporary files
+        if: always()
+        run: python tools/accept_release.py cleanup
+
+  accept:
+    name: accept-${{ matrix.target }}
+    needs: prepare
+    environment: tracking-release-acceptance
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      ACCEPTANCE_PLAN: ${{ needs.prepare.outputs.plan }}
+      RELEASE_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+          architecture: ${{ matrix.arch }}
+      - name: Verification dependencies
+        run: python -m pip install requests==2.32.5 PyNaCl==1.6.2 packaging==24.2
+      - name: Download and verify private baselines and exact candidate into runner temp
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRACKING_BASELINE_URLS: ${{ secrets.TRACKING_BASELINE_URLS }}
+        run: python tools/accept_release.py download
+      - name: Candidate source test dependencies
+        run: python -m pip install -r candidate/agent/requirements-build.txt
+      - name: Legacy Qt source dependencies
+        if: matrix.ui == 'qt'
+        run: python candidate/tools/install_qt.py
+      - name: Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb xauth x11-utils xprintidle libx11-6 libegl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-keysyms1 libxcb-icccm4 libgtk-3-0 libnss3 libgbm1 libasound2 libxss1 libatk-bridge2.0-0
+      - name: Both genuine published upgrades with all existing smoke assertions
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a python tools/accept_release.py test
+          else
+            python tools/accept_release.py test
+          fi
+      - name: Delete private archives, captured output and isolated profiles
+        if: always()
+        run: python tools/accept_release.py cleanup
+
+  promote:
+    needs: [prepare, accept]
+    if: github.ref == 'refs/heads/main' && needs.prepare.result == 'success' && needs.accept.result == 'success'
+    environment: tracking-release-acceptance
+    permissions:
+      contents: write
+      actions: read
+      deployments: read
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      ACCEPTANCE_PLAN: ${{ needs.prepare.outputs.plan }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.10.19'
+      - run: python -m pip install requests==2.32.5 PyNaCl==1.6.2 packaging==24.2
+      - name: Recheck all eight results and publish unchanged verified assets as v3.2.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tools/accept_release.py promote
+      - name: Remove temporary public verification downloads
+        if: always()
+        run: python tools/accept_release.py cleanup

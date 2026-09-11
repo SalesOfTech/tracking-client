@@ -4,25 +4,52 @@
     try { window.__softTrackingV3.stop(); } catch (_) { /* Previous extension context may already be invalidated. */ }
   }
   let policy = {};
+  let employeeEpoch = null;
+  let sessionGeneration = null;
   let activeAt = Date.now();
-  let sessionStart = null;
+  let session = null;
   let currentUrl = location.href;
   let stopped = false;
   const listeners = [];
+  const pending = [];
+  let sending = false;
+  let deliveryBlocked = false;
   const now = () => Math.floor(Date.now() / 1000);
   function id() {
     return Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
   }
-  function enabled() { return !stopped && policy.policy_expires_at * 1000 > Date.now() && TrackingPrivacy.hostAllowed(location.href, policy.domains); }
+  function enabled() { return !stopped && !deliveryBlocked && /^[a-f0-9]{32}$/.test(employeeEpoch || '') && policy.policy_expires_at * 1000 > Date.now() && TrackingPrivacy.hostAllowed(location.href, policy.domains); }
+  function drain() {
+    if (sending || !pending.length) return;
+    sending = true;
+    let finished = false;
+    const timer = setTimeout(() => complete(false), 5000);
+    function complete(ok) {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      sending = false;
+      if (!ok) { deliveryBlocked = true; return; }
+      pending.shift();
+      deliveryBlocked = false;
+      drain();
+    }
+    try {
+      chrome.runtime.sendMessage(pending[0], response => {
+        complete(!chrome.runtime.lastError && response && response.ok === true);
+      });
+    } catch (_) { complete(false); }
+  }
+  function queue(message) {
+    pending.push(message);
+    if (pending.length >= 128) deliveryBlocked = true;
+    drain();
+  }
   function send(type, target, timing) {
     if (!enabled()) return;
     const event = TrackingPrivacy.sanitize(Object.assign({event_id: id(), type, timestamp: now(), url: currentUrl, target}, timing), policy);
     if (!event) return;
-    try {
-      chrome.runtime.sendMessage({action: 'record', event}, response => {
-        if (chrome.runtime.lastError || !response || !response.ok) policy = {};
-      });
-    } catch (_) { policy = {}; }
+    queue({action: 'record', employee_epoch: employeeEpoch, event});
   }
   function describe(element, includeValue) {
     const tag = element.tagName.toLowerCase();
@@ -45,21 +72,31 @@
     listeners.push(() => target.removeEventListener(name, fn, options));
   }
   function finishSession() {
-    if (sessionStart !== null) {
-      const end = Math.min(now(), Math.floor(activeAt / 1000) + 30);
-      if (end > sessionStart) send('web_session', {}, {timestamp: sessionStart, end_timestamp: end});
-      sessionStart = null;
+    if (session !== null) {
+      if (!deliveryBlocked) {
+        const end = Math.min(now(), Math.floor(activeAt / 1000) + 30, policy.policy_expires_at || now());
+        const event = TrackingPrivacy.sanitize({event_id: session.event_id, type: 'web_session',
+          timestamp: session.timestamp, end_timestamp: end, url: session.url}, policy);
+        if (event) queue({action: 'session', employee_epoch: session.employee_epoch, event, close: false});
+      }
+      // The background closes the last durable checkpoint, independent of the new policy.
+      queue({action: 'session-close', employee_epoch: session.employee_epoch, event_id: session.event_id});
+      session = null;
     }
   }
   function tick() {
+    drain();
     if (currentUrl !== location.href) {
       finishSession();
       currentUrl = location.href;
       send('navigation', {label: document.title.slice(0, 160)});
     }
     if (!enabled() || document.visibilityState !== 'visible' || !document.hasFocus() || Date.now() - activeAt > 30000 || !policy.tracking) { finishSession(); return; }
-    if (sessionStart !== null && now() - sessionStart >= 15) finishSession();
-    if (sessionStart === null) sessionStart = now();
+    if (session !== null && now() - session.timestamp >= 15) finishSession();
+    if (session === null) session = {event_id: id(), timestamp: now(), url: currentUrl, employee_epoch: employeeEpoch};
+    const event = TrackingPrivacy.sanitize({event_id: session.event_id, type: 'web_session', timestamp: session.timestamp,
+      end_timestamp: Math.min(now(), Math.floor(activeAt / 1000) + 30), url: session.url}, policy);
+    if (event) queue({action: 'session', employee_epoch: session.employee_epoch, event, close: false});
   }
   on(document, 'click', event => {
     if (!event.isTrusted || !enabled()) return;
@@ -75,9 +112,18 @@
   on(document, 'visibilitychange', tick);
   on(window, 'blur', finishSession);
   on(window, 'pagehide', finishSession);
-  const storageChange = (changes, area) => { if (area === 'local' && changes.status) policy = changes.status.newValue && changes.status.newValue.policy || {}; };
+  function applyStatus(status) {
+    const next = status || {};
+    const nextPolicy = next.policy || {};
+    if (employeeEpoch !== next.employee_epoch || sessionGeneration !== next.browser_session_generation || JSON.stringify(policy) !== JSON.stringify(nextPolicy)) finishSession();
+    employeeEpoch = next.employee_epoch || null;
+    sessionGeneration = next.browser_session_generation;
+    policy = nextPolicy;
+    drain();
+  }
+  const storageChange = (changes, area) => { if (area === 'local' && changes.status) applyStatus(changes.status.newValue); };
   chrome.storage.onChanged.addListener(storageChange);
-  chrome.runtime.sendMessage({action: 'status'}, response => { if (!chrome.runtime.lastError && response && response.ok) policy = response.status.policy || {}; });
+  chrome.runtime.sendMessage({action: 'status'}, response => { if (!chrome.runtime.lastError && response && response.ok) applyStatus(response.status); });
   const timer = setInterval(tick, 1000);
   window.__softTrackingV3 = {stop() { finishSession(); stopped = true; clearInterval(timer); listeners.forEach(remove => remove()); chrome.storage.onChanged.removeListener(storageChange); }};
 })();

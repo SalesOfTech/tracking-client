@@ -42,20 +42,21 @@ def available():
 
 
 def validate(action, data):
-    fields = {'status': (), 'enroll': ('code', 'key'), 'check': (), 'repair': (), 'retry': (), 'resume': (),
-              'open': ('target',), 'preferences': ('language', 'theme'), 'install': ('code',),
+    fields = {'status': (), 'enroll': ('code', 'key'), 'switch-employee': ('key',), 'stop-agent': (),
+              'browser-page': ('browser',), 'check': (), 'repair': (), 'retry': (), 'resume': (),
+              'open': ('target',), 'preferences': ('language',), 'install': ('code',),
               'launch': (), 'ready': ()}
     if action not in fields or not isinstance(data, dict) or set(data) - set(fields[action]):
         raise ValueError('invalid_request')
     if action in ('enroll', 'install') and not re.fullmatch('[a-f0-9]{32}', str(data.get('code', ''))):
         raise ValueError('setup_code_required')
-    if action == 'enroll' and not re.fullmatch('[a-f0-9]{64}', str(data.get('key', ''))):
+    if action in ('enroll', 'switch-employee') and not re.fullmatch('[a-f0-9]{64}', str(data.get('key', ''))):
         raise ValueError('invalid_employee_key')
     if action == 'preferences':
-        if 'language' in data and data['language'] not in LANGUAGES:
+        if data.get('language') not in LANGUAGES:
             raise ValueError('invalid_request')
-        if 'theme' in data and data['theme'] not in ('system', 'light', 'dark'):
-            raise ValueError('invalid_request')
+    if action == 'browser-page' and data.get('browser') not in ('Chrome', 'Edge', 'Yandex', 'Opera', 'Brave', 'Vivaldi', 'Chromium', 'Firefox'):
+        raise ValueError('invalid_request')
     if action == 'open' and data.get('target') not in ('guide', 'extension', 'dashboard'):
         raise ValueError('invalid_request')
 
@@ -67,18 +68,22 @@ class Controller:
         profile = read_json(install / 'enrollment.json', {}) if install else {}
         self.code = profile.get('company_code') or code
         self.language = client_language(client.state.get('language', ''), profile) if client else detect_language()
-        self.theme = client.state.get('theme', 'system') if client else 'system'
-        if self.theme not in ('system', 'light', 'dark'):
-            self.theme = 'system'
+        self.theme = 'system'
         self.busy, self.error, self.message = False, '', ''
         self.job, self.launcher = None, None
         self.phase = 'waiting'
         self.health, self.ready, self.exit_requested = health, False, False
+        from .admin_control import AdminControl
+        self.admin = AdminControl(install)
 
     def snapshot(self):
-        error_text = translate(self.language, self.error) if self.error else ''
+        error = self.error
+        try:
+            error_text = translate(self.language, error) if error else ''
+        except KeyError:
+            error_text = translate(self.language, 'connect_failed')
         view = dict(mode=self.mode, language=self.language, theme=self.theme, code=self.code,
-                    busy=self.busy, error=self.error, errorText=error_text, message=self.message, phase=self.phase)
+                    busy=self.busy, error=error, errorText=error_text, message=self.message, phase=self.phase)
         if not self.client:
             view.update(version=read_json(self.bundle / 'setup-build.json', {}).get('version', ''), enrolled=False)
             return view
@@ -100,6 +105,7 @@ class Controller:
             domains=policy.get('domains', []), programs=policy.get('track_processes', []),
             policy={flag: bool(policy.get(flag)) for flag in ('tracking', 'interactions', 'field_values', 'app_inventory')},
             update=update_state if update_state in ('active', 'installed', 'checking', 'registration', 'downloading', 'rolled_back', 'error') else 'checking',
+            admin=self.admin.status(),
         )
         return view
 
@@ -113,7 +119,8 @@ class Controller:
             except Exception as error:
                 # Never expose request bodies, tokens, filesystem paths or server traces.
                 allowed = {'setup_code_required', 'setup_company_conflict', 'setup_company_unavailable',
-                           'setup_existing_damaged', 'setup_upgrade_failed', 'setup_wrong_target', 'setup_close_required'}
+                           'setup_existing_damaged', 'setup_upgrade_failed', 'setup_wrong_target', 'setup_close_required',
+                           'employee_switch_not_ready', 'employee_switch_pending_activity', 'stop_pending_activity', 'browser_not_found', 'browser_open_failed'}
                 self.error = str(error) if str(error) in allowed else 'setup_failed' if self.bundle else 'connect_failed'
                 if self.bundle:
                     self.phase = 'failed'
@@ -132,7 +139,7 @@ class Controller:
                 atomic_json(Path(os.environ['SOFT_TRACKING_HEALTH']), {'ready': True, 'ui': 'electron'})
             return {}
         if action == 'preferences':
-            for key in ('language', 'theme'):
+            for key in ('language',):
                 if key in data:
                     setattr(self, key, data[key])
                     if self.client:
@@ -165,6 +172,28 @@ class Controller:
                 self.worker.sync_requested.set()
                 self.message = 'connected'
             self.task(enroll)
+        elif action == 'switch-employee' and self.client and self.worker and self.code:
+            if not self.client.state.get('identity'):
+                raise ValueError('invalid_request')
+            def switch_employee():
+                self.worker.switch_employee(self.code, data['key'])
+                self.message = 'employee_changed'
+            self.task(switch_employee)
+        elif action == 'stop-agent' and self.client and self.worker and not self.bundle:
+            def stop_agent():
+                result = self.admin.request_stop()
+                if result.get('authorized') is True:
+                    try:
+                        self.worker.request_graceful_stop()
+                    except Exception as error:
+                        raise ValueError('stop_pending_activity') from error
+                    self.exit_requested = True
+                else:
+                    self.message = 'stop_' + result['state']
+            self.task(stop_agent)
+        elif action == 'browser-page':
+            from .browser_setup import open_extensions_page
+            self.task(lambda: open_extensions_page(data['browser']))
         elif action == 'resume' and self.client and not self.bundle:
             if self.busy or self.client.status().get('collection_reason') != 'paused_local':
                 raise ValueError('invalid_request')
@@ -179,7 +208,7 @@ class Controller:
                     from .browser_setup import register_host
                     register_host(self.install / executable_name(True, True), self.client.state.root)
                 if action == 'retry':
-                    self.client.outbox.retry_rejected()
+                    self.client.retry_rejected()
                     self.client.state.set('retry_generation', int(time.time() * 1000))
                 if self.worker:
                     self.worker.sync_requested.set()
@@ -202,7 +231,11 @@ class Controller:
             if domain:
                 webbrowser.open('https://' + domain + '/dashboard/?' + urlencode({'period': 'day'}))
             return
-        folder = self.bundle / 'guide' if self.bundle else self.install / 'extension' if self.install else None
+        if target == 'extension':
+            installed = self.install or (Path(self.launcher).parent if self.launcher else None)
+            folder = installed / 'extension' if installed else None
+        else:
+            folder = self.bundle / 'guide' if self.bundle else self.install / 'extension' if self.install else None
         if not folder:
             raise ValueError('package_missing')
         path = folder if target == 'extension' else folder / 'setup.html'

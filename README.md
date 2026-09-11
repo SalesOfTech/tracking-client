@@ -39,6 +39,11 @@ with Playwright in CI. Build commands do not require employee credentials.
 
 ## Build Candidates
 
+Use payload version `3.2.0`, without an RC suffix. A stable version in the binaries
+does not imply release approval. The [3.2.0 release plan](tools/release-plan-3.2.0.md)
+separates eight-target builds, exact-artifact private acceptance, normal public
+release publication, and subsequent production catalog promotion.
+
 Run the candidate workflow manually from `main`. It creates a draft tagged
 `candidate-<version>-<run_id>-<run_attempt>` at the exact source commit. Each passing
 native job uploads only its new ZIP and SHA-256 file directly as Release assets,

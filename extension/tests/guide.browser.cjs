@@ -1,4 +1,4 @@
-const {chromium} = require('playwright');
+const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -6,7 +6,7 @@ const {pathToFileURL} = require('node:url');
 const {guides} = require('../setup.js');
 
 (async () => {
-  const browser = await chromium.launch({headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
+  const browser = await chromium.launch({headless: process.env.PLAYWRIGHT_HEADED !== '1', ...(process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {})});
   try {
     const errors = [];
     const context = await browser.newContext({locale:'en-US'});
@@ -26,8 +26,9 @@ const {guides} = require('../setup.js');
         assert.ok(await page.locator('header img').evaluate(img => img.complete && img.naturalWidth > 0));
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
         await page.locator('nav a').last().click();
-        await page.waitForFunction(() => document.getElementById('help').getBoundingClientRect().top < innerHeight);
-        assert.ok(await page.locator('#help').evaluate(el => el.getBoundingClientRect().top < innerHeight));
+        const lastSection=guides[language].sections.at(-1)[0];
+        await page.waitForFunction(id=>document.getElementById(id).getBoundingClientRect().top<innerHeight,lastSection);
+        assert.ok(await page.locator('#'+lastSection).evaluate(el=>el.getBoundingClientRect().top<innerHeight));
         await page.screenshot({path:`artifacts/verification/guide-${language}-${width}.png`, fullPage:true});
       }
     }

@@ -36,5 +36,6 @@ def main(native=False, root=None, args=None):
                     return result
             return 1
     except RuntimeError:
-        atomic_json(root / "show-window.json", {"show": True})
+        if '--autostart' not in args:
+            atomic_json(root / "show-window.json", {"show": True})
         return 0

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
+import re
 import struct
 import sys
 
@@ -11,7 +13,30 @@ from .core.client import Client
 HOST_NAME = "com.soft.tracking"
 EXTENSION_ID = "bjjdlmnghnhfnjlgacoijncoggpnfnjh"
 ALLOWED_ORIGIN = "chrome-extension://" + EXTENSION_ID + "/"
+FIREFOX_EXTENSION_ID = "tracking@salesof.tech"
 MAX_MESSAGE = 1024 * 1024
+
+
+def authorized_caller(origin, arguments=()):
+    if origin == ALLOWED_ORIGIN:
+        return True
+    # Firefox passes the host manifest path followed by the add-on ID, not an origin.
+    if not isinstance(origin, str) or not isinstance(arguments, (tuple, list)) or not arguments or arguments[0] != FIREFOX_EXTENSION_ID:
+        return False
+    path = Path(origin)
+    return path.is_absolute() and path.name in (HOST_NAME + '.json', HOST_NAME + '.firefox.json')
+
+
+def host_manifest(executable, engine='chromium'):
+    manifest = dict(name=HOST_NAME, description='SOFT Tracking desktop connection',
+                    path=str(executable), type='stdio')
+    if engine == 'chromium':
+        manifest['allowed_origins'] = [ALLOWED_ORIGIN]
+    elif engine == 'gecko':
+        manifest['allowed_extensions'] = [FIREFOX_EXTENSION_ID]
+    else:
+        raise ValueError('Unsupported browser engine')
+    return manifest
 
 
 def read_exact(stream, length):
@@ -49,6 +74,8 @@ def write_message(stream, value):
 
 
 def handle(client, message):
+    if not isinstance(message, dict):
+        raise ValueError('Invalid native message')
     action = message.get("action")
     if action == "status":
         if 'browser' in message:
@@ -65,18 +92,29 @@ def handle(client, message):
         events = message.get("events")
         if not isinstance(events, list) or len(events) > 100 or any(not isinstance(event, dict) for event in events):
             raise ValueError("Invalid event batch")
+        epoch = message.get('employee_epoch')
+        if epoch is not None and (not isinstance(epoch, str) or not re.fullmatch('[a-f0-9]{32}', epoch)):
+            raise ValueError('Invalid employee epoch')
+        outbox = client.outbox_for_epoch(epoch)
         ids = []
         for event in events:
+            event_id = event.get('event_id')
+            if not isinstance(event_id, str) or not re.fullmatch('[a-f0-9]{32}', event_id):
+                raise ValueError('Invalid event ID')
             if event.get("type") not in ("web_session", "link_click", "button_click", "field_change", "form_submit", "navigation"):
                 raise ValueError("Unsupported browser event")
-            client.outbox.push_payload(event)
+            if 'employee_epoch' in event:
+                raise ValueError('Employee epoch belongs to the batch envelope')
+        for event in events:
+            outbox.push_payload(event)
             ids.append(event["event_id"])
-        return {"ok": True, "stored_event_ids": ids, "confirmed_event_ids": client.outbox.confirmed(ids), "rejected": client.outbox.rejections(ids)}
+        return {"ok": True, "employee_epoch": epoch if epoch is not None else client.state.get('legacy_employee_epoch'),
+                "stored_event_ids": ids, "confirmed_event_ids": outbox.confirmed(ids), "rejected": outbox.rejections(ids)}
     raise ValueError("Unknown native action")
 
 
-def main(origin: str, stdin=None, stdout=None, client=None) -> int:
-    if origin != ALLOWED_ORIGIN:
+def main(origin: str, stdin=None, stdout=None, client=None, arguments=None) -> int:
+    if not authorized_caller(origin, sys.argv[2:] if arguments is None else arguments):
         return 2
     if os.name == "nt" and stdin is None:
         import msvcrt

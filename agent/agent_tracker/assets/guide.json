@@ -1,0 +1,230 @@
+{
+  "en": {
+    "intro": "SOFT Tracking collects work activity according to your company settings. Check its status in the application. This installation guide is available inside the app without an internet connection.",
+    "note": "Use the installer supplied by your company. Keep employee activation codes private. Do not delete application data or browser profiles while events are waiting for server confirmation.",
+    "sections": [
+      {
+        "id": "install",
+        "title": "Install and activate",
+        "steps": [
+          "In the Tracking widget settings, open Installation. Check the operating system and architecture, download your company installer and keep its original filename.",
+          "Use the installer format offered for your operating system: SOFT-Tracking-Setup.exe on Windows; SOFT-Tracking-Setup.dmg on macOS, then SOFT-Tracking-Setup.app inside the mounted image; SOFT-Tracking-Setup.run on Linux, with execution allowed in its file properties. A company download may add a company code to the filename; keep that name unchanged. Use only a build compatible with your OS and architecture.",
+          "Use the employee's OS account for the application and browser. Follow any administrator approval requested by the installer. The current application is not an administrator-protected system service; do not assume an employee cannot stop it or disable an unmanaged extension.",
+          "Check the Company installation code and select Install. Open Connection in the application, enter the Employee activation code supplied by your administrator and select Activate. In the Qt fallback these controls are Employee key and Connect. Check the displayed company and employee name. One employee can connect several computers within the same company.",
+          "To hand this computer to another employee in the same company, open Connection and select Change employee. Enter the next employee's activation code and confirm. Pending activity keeps its original employee. If the switch is blocked, update and reconnect the work browser extensions, then try again."
+        ]
+      },
+      {
+        "id": "browsers",
+        "title": "Connect work browsers",
+        "steps": [
+          "Open Browsers and select Repair browser connection (Connect browsers in the Qt fallback), then Extension folder. The application and browser must run under the same OS account. Set up each work browser profile separately.",
+          "For Chromium browsers, open the extensions page: Chrome chrome://extensions, Edge edge://extensions, Yandex browser://extensions, Opera opera://extensions, Brave brave://extensions or Vivaldi vivaldi://extensions. Enable Developer mode, choose Load unpacked and select the permanent extension folder opened by the application. Browser labels can vary by version and language.",
+          "Keep the permanent extension folder in place. If company browser policy blocks unpacked extensions, ask your administrator for an approved installation method. Do not change security policies to bypass the restriction.",
+          "This release does not include a signed Firefox XPI, so Firefox setup is pending. Firefox requires a signed XPI supplied with an approved release. If no signed XPI is available, Firefox setup is not available. When your administrator supplies one, install it through Firefox Add-ons and Themes (about:addons), using Install Add-on From File, and approve the requested permissions. Do not use temporary loading or turn off signature verification.",
+          "Return to Connection and select Check connection (Check again in the Qt fallback). Allow up to a minute for the browser connection to appear. Visit a company-enabled work website; Last confirmed session shows that a website session reached the server. The extension toolbar icon opens the application. Private or incognito windows are not tracked. Safari is unsupported."
+        ]
+      },
+      {
+        "id": "permissions",
+        "title": "Operating system permissions",
+        "steps": [
+          "If Windows or macOS displays a publisher or security warning, ask your administrator to verify the installer source before approving this application. Keep antivirus, system protection and browser security enabled.",
+          "On macOS, open Privacy & Security when Accessibility, Automation or screen information access is requested. Approve only SOFT Tracking and the permissions actually requested. OS permissions require your confirmation and cannot be granted silently.",
+          "Desktop application tracking on Linux requires an X11 session. Wayland is not supported in this release. Ask your administrator which supported session to use.",
+          "To stop through the application, open Settings and select Stop agent (Stop with administrator approval in Qt). Approve the OS administrator request. If authorization is cancelled, denied or unavailable, collection continues. An authorized stop saves pending activity before exit. This per-user application is not protected against a force-quit by the same OS user. If current activity cannot be saved, the app remains open; check free disk space and try again."
+        ]
+      },
+      {
+        "id": "updates",
+        "title": "Updates",
+        "steps": [
+          "SOFT Tracking checks for updates at startup and while running. Prepared releases are applied automatically after update-signature verification. If the new version fails to start, the updater restores the previous version. Update signatures are separate from OS publisher signing.",
+          "The extension package updates with the agent. Browser activation can wait for local events to synchronize or for a reload. Follow browser prompts and approve new permissions only for the verified extension. A Firefox update must also be a signed XPI.",
+          "Check Automatic updates in the application for the current status. Old v2 installations are not migrated automatically. Do not reinstall over an existing v3 installation to force an update; ask your administrator and preserve local data until delivery is confirmed."
+        ]
+      },
+      {
+        "id": "troubleshooting",
+        "title": "Connection and delivery problems",
+        "steps": [
+          "Check the company, employee name, internet connection and collection status. Company settings may disable collection, or collection permission may expire while offline. Browser connection alone does not confirm delivery of a website session.",
+          "Check Pending delivery on Connection, or Connection details in the Qt fallback. Events remain locally until the server confirms storage. Rejected events need attention. After your administrator resolves the cause, open Settings and select Retry delivery (Retry unconfirmed events in the Qt fallback).",
+          "For a missing browser connection, check that the extension is enabled in the correct work profile, the app is running under the same OS account and the installed extension package is current. Use Repair browser connection (Connect browsers in Qt), then check the connection again. Firefox requires the signed XPI; Safari cannot connect.",
+          "Do not delete application data, the extension folder or browser profiles to fix pending delivery. Check free disk space if collection stops. Send support the OS, application version, error text and pending event count, but never an employee activation code or private browsing data."
+        ]
+      }
+    ]
+  },
+  "ru": {
+    "intro": "SOFT Tracking собирает рабочую активность по настройкам компании. Состояние можно проверить в приложении. Эта инструкция доступна внутри приложения без интернета.",
+    "note": "Используйте установщик вашей компании. Не передавайте коды активации сотрудников. Не удаляйте данные приложения и профили браузера, пока события ожидают подтверждения сервера.",
+    "sections": [
+      {
+        "id": "install",
+        "title": "Установка и активация",
+        "steps": [
+          "В настройках виджета Tracking откройте «Установка». Проверьте операционную систему и архитектуру, скачайте установщик компании и сохраните исходное имя файла.",
+          "Используйте предложенный формат установщика для вашей ОС: SOFT-Tracking-Setup.exe в Windows; SOFT-Tracking-Setup.dmg в macOS, затем SOFT-Tracking-Setup.app внутри подключённого образа; SOFT-Tracking-Setup.run в Linux с разрешением запуска в свойствах файла. Загрузка для компании может добавлять код компании к имени файла: не меняйте это имя. Используйте только сборку, совместимую с вашей ОС и архитектурой.",
+          "Запускайте приложение и браузер под учётной записью сотрудника. Подтвердите запрос администратора, если его показывает установщик. Текущее приложение не является защищённой администратором системной службой: сотрудник всё ещё может остановить его или отключить неуправляемое расширение.",
+          "Проверьте «Код установки компании» и нажмите «Установить». В приложении откройте «Подключение», введите «Код активации сотрудника» от администратора и нажмите «Активировать». В резервном интерфейсе Qt это «Ключ сотрудника» и «Подключить». Проверьте компанию и имя сотрудника. Один сотрудник может подключить несколько компьютеров внутри своей компании.",
+          "Чтобы передать компьютер другому сотруднику той же компании, откройте «Подключение» и нажмите «Сменить сотрудника». Введите код активации следующего сотрудника и подтвердите смену. Неотправленная активность останется за прежним сотрудником. Если смена заблокирована, обновите и подключите расширения рабочих браузеров, затем повторите."
+        ]
+      },
+      {
+        "id": "browsers",
+        "title": "Подключение рабочих браузеров",
+        "steps": [
+          "Откройте «Браузеры», нажмите «Восстановить связь с браузером» («Подключить браузеры» в резервном интерфейсе Qt), затем «Папка расширения». Приложение и браузер должны работать под одной учётной записью ОС. Настройте каждый рабочий профиль отдельно.",
+          "В браузере Chromium откройте страницу расширений: Chrome chrome://extensions, Edge edge://extensions, Яндекс Браузер browser://extensions, Opera opera://extensions, Brave brave://extensions или Vivaldi vivaldi://extensions. Включите «Режим разработчика», выберите «Загрузить распакованное расширение» и укажите постоянную папку, открытую приложением. Названия команд могут отличаться в разных версиях и языках браузера.",
+          "Не перемещайте постоянную папку расширения. Если политика компании запрещает распакованные расширения, запросите у администратора разрешённый способ установки. Не меняйте политики безопасности ради обхода ограничения.",
+          "В этом выпуске нет подписанного XPI для Firefox, поэтому его подключение пока недоступно. Firefox требует подписанного XPI из одобренного выпуска. Когда администратор предоставит такой пакет, откройте «Дополнения и темы» (about:addons), выберите «Установить дополнение из файла», укажите подписанный пакет и подтвердите запрошенные разрешения. Не используйте временную загрузку и не отключайте проверку подписи.",
+          "Вернитесь в «Подключение» и нажмите «Проверить связь» («Проверить снова» в Qt). Подключение браузера может появиться в течение минуты. Откройте рабочий сайт, разрешённый компанией: «Последняя подтверждённая сессия» означает, что сессия сайта дошла до сервера. Значок расширения открывает приложение. Приватные окна и инкогнито не отслеживаются. Safari не поддерживается."
+        ]
+      },
+      {
+        "id": "permissions",
+        "title": "Разрешения операционной системы",
+        "steps": [
+          "Если Windows или macOS показывает предупреждение об издателе или безопасности, попросите администратора проверить источник установщика перед разрешением запуска. Оставьте антивирус, защиту системы и браузера включёнными.",
+          "В macOS откройте «Конфиденциальность и безопасность», если система запрашивает универсальный доступ, автоматизацию или сведения об экране. Разрешайте доступ только SOFT Tracking и только по фактическому запросу. Разрешения ОС требуют вашего подтверждения и не выдаются незаметно.",
+          "Учёт активности приложений в Linux требует сеанса X11. Wayland в этом выпуске не поддерживается. Уточните у администратора, какой поддерживаемый сеанс использовать.",
+          "Для остановки через приложение откройте «Настройки» и нажмите «Остановить агент» («Остановить с подтверждением администратора» в Qt). Подтвердите системный запрос администратора. При отмене, отказе или недоступности подтверждения сбор продолжается. После разрешённой остановки ожидающая активность сохраняется до выхода. Приложение работает для одного пользователя и не защищено от принудительного завершения тем же пользователем ОС. Если текущую активность не удалось сохранить, приложение останется открытым: проверьте место на диске и повторите."
+        ]
+      },
+      {
+        "id": "updates",
+        "title": "Обновления",
+        "steps": [
+          "SOFT Tracking проверяет обновления при запуске и во время работы. Подготовленные выпуски применяются автоматически после проверки подписи обновления. Если новая версия не запускается, восстанавливается предыдущая. Подпись обновления отличается от подписи издателя для ОС.",
+          "Пакет расширения обновляется вместе с агентом. Активация в браузере может ждать синхронизации локальных событий или перезагрузки. Следуйте запросам браузера и подтверждайте новые разрешения только для проверенного расширения. Обновление Firefox также требует подписанного XPI.",
+          "Проверьте состояние в разделе «Автоматическое обновление» («Автообновление» в Qt). Старые установки v2 не переносятся автоматически. Не переустанавливайте поверх существующей v3 ради обновления: обратитесь к администратору и сохраните локальные данные до подтверждения доставки."
+        ]
+      },
+      {
+        "id": "troubleshooting",
+        "title": "Проблемы с подключением и отправкой",
+        "steps": [
+          "Проверьте компанию, имя сотрудника, интернет и состояние сбора. Компания могла отключить сбор, либо разрешение на него истекло без связи с сервером. Само подключение браузера ещё не подтверждает доставку сессии сайта.",
+          "Проверьте «Ожидают отправки» на экране «Подключение» или откройте «Подробнее о соединении» в Qt. События остаются локально до подтверждения записи сервером. Отклонённые события требуют проверки. После устранения причины администратором откройте «Настройки» и нажмите «Повторить отправку» («Повторить отправку событий» в Qt).",
+          "Если браузер не подключён, проверьте, что расширение включено в нужном рабочем профиле, приложение запущено под той же учётной записью ОС и пакет расширения актуален. Нажмите «Восстановить связь с браузером» («Подключить браузеры» в Qt), затем проверьте связь снова. Firefox требует подписанного XPI; Safari подключить нельзя.",
+          "Не удаляйте данные приложения, папку расширения или профили браузера ради исправления отправки. При остановке сбора проверьте свободное место на диске. Передайте поддержке ОС, версию приложения, текст ошибки и число ожидающих событий, но не код активации сотрудника и не личные данные просмотра."
+        ]
+      }
+    ]
+  },
+  "cs": {
+    "intro": "SOFT Tracking sbírá pracovní aktivitu podle nastavení společnosti. Stav zkontrolujete v aplikaci. Tento návod je dostupný přímo v aplikaci i bez připojení k internetu.",
+    "note": "Používejte instalátor vaší společnosti. Aktivační kódy zaměstnanců nesdílejte. Nemažte data aplikace ani profily prohlížeče, dokud události čekají na potvrzení serveru.",
+    "sections": [
+      {
+        "id": "install",
+        "title": "Instalace a aktivace",
+        "steps": [
+          "V nastavení widgetu Tracking otevřete Instalace. Zkontrolujte operační systém a architekturu, stáhněte instalátor společnosti a zachovejte původní název souboru.",
+          "Použijte nabízený formát instalátoru pro váš OS: SOFT-Tracking-Setup.exe ve Windows; SOFT-Tracking-Setup.dmg v macOS a poté SOFT-Tracking-Setup.app uvnitř připojeného obrazu; SOFT-Tracking-Setup.run v Linuxu s povoleným spuštěním ve vlastnostech souboru. Firemní stažení může do názvu přidat kód společnosti; tento název neměňte. Použijte pouze sestavení kompatibilní s vaším OS a architekturou.",
+          "Aplikaci a prohlížeč používejte pod účtem zaměstnance v OS. Potvrďte případný požadavek instalátoru na schválení správcem. Současná aplikace není systémovou službou chráněnou správcem: zaměstnanec ji stále může zastavit nebo vypnout nespravované rozšíření.",
+          "Zkontrolujte Instalační kód společnosti a zvolte Nainstalovat. V aplikaci otevřete Připojení, zadejte Aktivační kód zaměstnance od správce a zvolte Aktivovat. V záložním rozhraní Qt jde o Klíč zaměstnance a Připojit. Zkontrolujte společnost a jméno zaměstnance. Zaměstnanec může připojit více počítačů v rámci stejné společnosti.",
+          "Chcete-li počítač předat jinému zaměstnanci stejné společnosti, otevřete Připojení a zvolte Změnit zaměstnance. Zadejte aktivační kód dalšího zaměstnance a změnu potvrďte. Neodeslaná aktivita zůstane původnímu zaměstnanci. Pokud je změna blokována, aktualizujte a připojte rozšíření pracovních prohlížečů a zkuste to znovu."
+        ]
+      },
+      {
+        "id": "browsers",
+        "title": "Připojení pracovních prohlížečů",
+        "steps": [
+          "Otevřete Prohlížeče, zvolte Opravit připojení prohlížeče (Připojit prohlížeče v záložním rozhraní Qt) a poté Složka rozšíření. Aplikace a prohlížeč musí běžet pod stejným účtem OS. Nastavte každý pracovní profil zvlášť.",
+          "V prohlížeči Chromium otevřete stránku rozšíření: Chrome chrome://extensions, Edge edge://extensions, Yandex browser://extensions, Opera opera://extensions, Brave brave://extensions nebo Vivaldi vivaldi://extensions. Zapněte Režim pro vývojáře, zvolte Načíst rozbalené a vyberte trvalou složku otevřenou aplikací. Názvy příkazů se mohou lišit podle verze a jazyka prohlížeče.",
+          "Trvalou složku rozšíření nepřesouvejte. Pokud firemní zásady blokují rozbalená rozšíření, požádejte správce o schválený způsob instalace. Neměňte zásady zabezpečení kvůli obejití omezení.",
+          "Toto vydání neobsahuje podepsaný XPI pro Firefox, proto jeho připojení zatím není dostupné. Firefox vyžaduje podepsaný XPI ze schváleného vydání. Až správce takový balíček poskytne, v nabídce Doplňky a vzhledy (about:addons) zvolte Instalovat doplněk ze souboru, vyberte podepsaný balíček a potvrďte požadovaná oprávnění. Nepoužívejte dočasné načítání ani nevypínejte ověřování podpisu.",
+          "Vraťte se do Připojení a zvolte Ověřit připojení (Ověřit znovu v Qt). Připojení prohlížeče se může objevit do minuty. Navštivte pracovní web povolený společností; Poslední potvrzená relace znamená, že relace webu dorazila na server. Ikona rozšíření otevírá aplikaci. Soukromá a anonymní okna se nesledují. Safari není podporováno."
+        ]
+      },
+      {
+        "id": "permissions",
+        "title": "Oprávnění operačního systému",
+        "steps": [
+          "Pokud Windows nebo macOS zobrazí varování o vydavateli či zabezpečení, požádejte správce o ověření zdroje instalátoru před schválením aplikace. Antivirus i ochranu systému a prohlížeče ponechte zapnuté.",
+          "V macOS otevřete Soukromí a zabezpečení, pokud systém požaduje Zpřístupnění, Automatizaci nebo údaje o obrazovce. Schvalte jen SOFT Tracking a skutečně požadovaná oprávnění. Oprávnění OS vyžadují vaše potvrzení a nelze je udělit skrytě.",
+          "Sledování aktivity aplikací v Linuxu vyžaduje relaci X11. Wayland není v tomto vydání podporován. O vhodné podporované relaci se poraďte se správcem.",
+          "Pro zastavení přes aplikaci otevřete Nastavení a zvolte Zastavit agenta (Zastavit se schválením správce v Qt). Potvrďte systémový požadavek na oprávnění správce. Při zrušení, zamítnutí nebo nedostupném schválení sběr pokračuje. Schválené zastavení uloží čekající aktivitu před ukončením. Tato aplikace pro jednoho uživatele není chráněna proti vynucenému ukončení stejným uživatelem OS. Pokud aktuální aktivitu nelze uložit, aplikace zůstane otevřená; zkontrolujte volné místo na disku a zkuste to znovu."
+        ]
+      },
+      {
+        "id": "updates",
+        "title": "Aktualizace",
+        "steps": [
+          "SOFT Tracking kontroluje aktualizace při spuštění i během provozu. Připravená vydání se použijí automaticky po ověření podpisu aktualizace. Pokud se nová verze nespustí, obnoví se předchozí. Podpis aktualizace není totéž co podpis vydavatele pro OS.",
+          "Balíček rozšíření se aktualizuje s agentem. Aktivace v prohlížeči může čekat na synchronizaci místních událostí nebo nové načtení. Řiďte se výzvami prohlížeče a nová oprávnění schvalte pouze ověřenému rozšíření. Také aktualizace pro Firefox musí být podepsaný XPI.",
+          "Aktuální stav najdete v aplikaci u Automatické aktualizace. Staré instalace v2 se nepřevádějí automaticky. Kvůli vynucení aktualizace nepřeinstalovávejte stávající v3; obraťte se na správce a uchovejte místní data do potvrzení doručení."
+        ]
+      },
+      {
+        "id": "troubleshooting",
+        "title": "Problémy s připojením a odesíláním",
+        "steps": [
+          "Zkontrolujte společnost, jméno zaměstnance, internet a stav sběru. Společnost mohla sběr vypnout nebo jeho oprávnění mohlo bez připojení vypršet. Samotné připojení prohlížeče nepotvrzuje doručení relace webu.",
+          "V Připojení zkontrolujte Čeká na odeslání, případně otevřete Podrobnosti připojení v Qt. Události zůstávají místně do potvrzení uložení serverem. Odmítnuté události vyžadují pozornost. Po vyřešení příčiny správcem otevřete Nastavení a zvolte Opakovat odeslání (Znovu odeslat nepotvrzené události v Qt).",
+          "Pokud prohlížeč není připojený, ověřte zapnuté rozšíření ve správném pracovním profilu, spuštěnou aplikaci pod stejným účtem OS a aktuální balíček rozšíření. Zvolte Opravit připojení prohlížeče (Připojit prohlížeče v Qt) a připojení znovu ověřte. Firefox vyžaduje podepsaný XPI; Safari připojit nelze.",
+          "Kvůli čekajícímu odesílání nemažte data aplikace, složku rozšíření ani profily prohlížeče. Při zastavení sběru zkontrolujte volné místo na disku. Podpoře pošlete OS, verzi aplikace, text chyby a počet čekajících událostí, nikoli aktivační kód zaměstnance nebo soukromá data prohlížení."
+        ]
+      }
+    ]
+  },
+  "uz": {
+    "intro": "SOFT Tracking ish faoliyatini kompaniya sozlamalariga muvofiq yig'adi. Holatni ilovada tekshiring. Bu qo'llanma ilova ichida internet aloqasisiz ham mavjud.",
+    "note": "Kompaniyangiz bergan o'rnatish dasturidan foydalaning. Xodim faollashtirish kodlarini sir saqlang. Hodisalar server tasdig'ini kutayotganida ilova ma'lumotlari yoki brauzer profillarini o'chirmang.",
+    "sections": [
+      {
+        "id": "install",
+        "title": "O'rnatish va faollashtirish",
+        "steps": [
+          "Tracking vidjeti sozlamalarida o'rnatish bo'limini oching. Operatsion tizim va arxitekturani tekshiring, kompaniya o'rnatish faylini yuklab oling va asl nomini saqlang.",
+          "OTingiz uchun taklif etilgan o'rnatish formatidan foydalaning: Windowsda SOFT-Tracking-Setup.exe; macOSda SOFT-Tracking-Setup.dmg, keyin ulangan tasvir ichidagi SOFT-Tracking-Setup.app; Linuxda fayl xususiyatlarida ishga tushirishga ruxsat berilgan SOFT-Tracking-Setup.run. Kompaniya yuklamasida fayl nomiga kompaniya kodi qo'shilishi mumkin; bu nomni o'zgartirmang. Faqat OTingiz va arxitekturangizga mos to'plamdan foydalaning.",
+          "Ilova va brauzerni xodimning OT hisobida ishlating. O'rnatish dasturi administrator tasdig'ini so'rasa, ko'rsatmalarga amal qiling. Joriy ilova administrator himoyasidagi tizim xizmati emas: xodim uni to'xtatishi yoki boshqarilmaydigan kengaytmani o'chirishi mumkin.",
+          "Kompaniya o'rnatish kodini tekshiring va O'rnatishni bosing. Ilovada Ulanishni oching, administrator bergan Xodim faollashtirish kodini kiriting va Faollashtirishni bosing. Qt zaxira interfeysida bular Xodim kaliti va Ulash deb nomlanadi. Kompaniya va xodim ismini tekshiring. Bir xodim o'z kompaniyasi doirasida bir nechta kompyuterni ulashi mumkin.",
+          "Kompyuterni shu kompaniyadagi boshqa xodimga berish uchun Ulanishni oching va Xodimni almashtirishni bosing. Keyingi xodimning faollashtirish kodini kiriting va tasdiqlang. Yuborilmagan faoliyat oldingi xodimga tegishli bo'lib qoladi. Almashtirish bloklansa, ish brauzerlari kengaytmalarini yangilang va ulang, keyin qayta urining."
+        ]
+      },
+      {
+        "id": "browsers",
+        "title": "Ish brauzerlarini ulash",
+        "steps": [
+          "Brauzerlar bo'limida Brauzer ulanishini tiklashni (Qt zaxira interfeysida Brauzerlarni ulash), so'ng Kengaytma papkasini bosing. Ilova va brauzer bir xil OT hisobida ishlashi kerak. Har bir ish profilini alohida sozlang.",
+          "Chromium brauzerida kengaytmalar sahifasini oching: Chrome chrome://extensions, Edge edge://extensions, Yandex browser://extensions, Opera opera://extensions, Brave brave://extensions yoki Vivaldi vivaldi://extensions. Developer mode (dasturchi rejimi)ni yoqing, Load unpackedni tanlang va ilova ochgan doimiy kengaytma papkasini ko'rsating. Buyruq nomlari brauzer versiyasi va tiliga qarab farq qilishi mumkin.",
+          "Doimiy kengaytma papkasini ko'chirmang. Kompaniya siyosati ochilgan kengaytmalarni bloklasa, administratordan tasdiqlangan o'rnatish usulini so'rang. Cheklovni chetlab o'tish uchun xavfsizlik siyosatini o'zgartirmang.",
+          "Bu relizda Firefox uchun imzolangan XPI yo'q, shuning uchun Firefoxni ulash hozircha mavjud emas. Firefox tasdiqlangan relizdagi imzolangan XPI talab qiladi. Administrator shunday paket berganida, Firefox Add-ons and Themes (about:addons) bo'limida Install Add-on From Fileni tanlang, imzolangan paketni ko'rsating va so'ralgan ruxsatlarni tasdiqlang. Vaqtinchalik yuklashdan foydalanmang va imzo tekshiruvini o'chirmang.",
+          "Ulanishga qayting va Ulanishni tekshirishni (Qt interfeysida Qayta tekshirish) bosing. Brauzer ulanishi bir daqiqagacha vaqtda ko'rinishi mumkin. Kompaniya ruxsat bergan ish saytini oching: Oxirgi tasdiqlangan sessiya (Qt interfeysida Oxirgi tasdiqlangan seans) sayt seansi serverga yetganini bildiradi. Kengaytma belgisi ilovani ochadi. Maxfiy va inkognito oynalar kuzatilmaydi. Safari qo'llab-quvvatlanmaydi."
+        ]
+      },
+      {
+        "id": "permissions",
+        "title": "Operatsion tizim ruxsatlari",
+        "steps": [
+          "Windows yoki macOS nashriyotchi yoki xavfsizlik haqida ogohlantirsa, ilovaga ruxsat berishdan oldin administratordan o'rnatish manbasini tekshirishni so'rang. Antivirus, tizim himoyasi va brauzer xavfsizligini yoqilgan holda qoldiring.",
+          "macOS Accessibility, Automation yoki ekran ma'lumotlariga kirishni so'rasa, Privacy & Securityni oching. Faqat SOFT Tracking va haqiqatda so'ralgan ruxsatlarni tasdiqlang. OT ruxsatlari sizning tasdig'ingizni talab qiladi va yashirincha berilmaydi.",
+          "Linuxda ilova faoliyatini kuzatish uchun X11 seansi kerak. Wayland bu relizda qo'llab-quvvatlanmaydi. Qaysi qo'llab-quvvatlanadigan seansdan foydalanishni administratordan so'rang.",
+          "Ilova orqali to'xtatish uchun Sozlamalarni oching va Agentni to'xtatishni (Qt interfeysida Administrator tasdig'i bilan to'xtatish) bosing. OT administrator so'rovini tasdiqlang. Tasdiq bekor qilinsa, rad etilsa yoki mavjud bo'lmasa, yig'ish davom etadi. Ruxsat berilgan to'xtatish chiqishdan oldin kutilayotgan faoliyatni saqlaydi. Bu bir foydalanuvchili ilova shu OT foydalanuvchisi tomonidan majburan yopilishdan himoyalanmagan. Joriy faoliyat saqlanmasa, ilova ochiq qoladi; diskdagi bo'sh joyni tekshiring va qayta urining."
+        ]
+      },
+      {
+        "id": "updates",
+        "title": "Yangilanishlar",
+        "steps": [
+          "SOFT Tracking ishga tushganda va ishlash davomida yangilanishlarni tekshiradi. Tayyor relizlar yangilanish imzosi tekshirilgach avtomatik qo'llanadi. Yangi versiya ishga tushmasa, oldingi versiya tiklanadi. Yangilanish imzosi OT nashriyotchi imzosidan farq qiladi.",
+          "Kengaytma paketi agent bilan yangilanadi. Brauzerda faollashish mahalliy hodisalar sinxronlanishini yoki qayta yuklashni kutishi mumkin. Brauzer so'rovlariga amal qiling va yangi ruxsatlarni faqat tekshirilgan kengaytma uchun tasdiqlang. Firefox yangilanishi ham imzolangan XPI bo'lishi kerak.",
+          "Joriy holatni ilovadagi Avtomatik yangilanish (Qt interfeysida Avtomatik yangilash) orqali tekshiring. Eski v2 o'rnatishlari avtomatik ko'chirilmaydi. Yangilanishni majburlash uchun mavjud v3 ustiga qayta o'rnatmang; administratorga murojaat qiling va yetkazish tasdiqlanmaguncha mahalliy ma'lumotlarni saqlang."
+        ]
+      },
+      {
+        "id": "troubleshooting",
+        "title": "Ulanish va yuborish muammolari",
+        "steps": [
+          "Kompaniya, xodim ismi, internet va yig'ish holatini tekshiring. Kompaniya yig'ishni o'chirgan yoki aloqa yo'qligida yig'ish ruxsati muddati tugagan bo'lishi mumkin. Brauzer ulanishining o'zi sayt seansi yetkazilganini tasdiqlamaydi.",
+          "Ulanish bo'limida Yuborish kutilmoqda holatini tekshiring yoki Qt interfeysida Ulanish tafsilotlarini oching. Hodisalar server saqlashni tasdiqlaguncha mahalliy qoladi. Rad etilgan hodisalar e'tibor talab qiladi. Administrator sababni bartaraf etgach, Sozlamalarda Qayta yuborishni (Qt interfeysida Tasdiqlanmagan hodisalarni qayta yuborish) bosing.",
+          "Brauzer ulanmasa, kengaytma to'g'ri ish profilida yoqilganini, ilova bir xil OT hisobida ishlayotganini va kengaytma paketi yangiligini tekshiring. Brauzer ulanishini tiklashni (Qt interfeysida Brauzerlarni ulash) bosing, keyin ulanishni qayta tekshiring. Firefox imzolangan XPI talab qiladi; Safari ulana olmaydi.",
+          "Yuborish muammosini tuzatish uchun ilova ma'lumotlari, kengaytma papkasi yoki brauzer profillarini o'chirmang. Yig'ish to'xtasa, diskdagi bo'sh joyni tekshiring. Yordam xizmatiga OT, ilova versiyasi, xato matni va kutilayotgan hodisalar sonini yuboring, lekin xodim faollashtirish kodi yoki shaxsiy ko'rish ma'lumotlarini yubormang."
+        ]
+      }
+    ]
+  }
+}

@@ -54,6 +54,7 @@ jobs:
           node extension/tests/collector.browser.cjs
           node extension/tests/load.browser.cjs
           node extension/tests/native.browser.cjs
+          node extension/tests/durable.browser.cjs
           node extension/tests/guide.browser.cjs
           xvfb-run -a npm run test:browser --prefix desktop
       - name: Client check summary

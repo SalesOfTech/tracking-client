@@ -9,7 +9,11 @@ import tempfile
 import time
 
 ROOT=Path(__file__).resolve().parents[1]
-sys.path.insert(0,str(ROOT/'agent'))
+CLIENT_ROOT=Path(os.environ.get('TRACKING_SMOKE_CLIENT_ROOT', ROOT)).resolve()
+sys.path.insert(0,str(CLIENT_ROOT/'agent'))
+import agent_tracker
+if Path(agent_tracker.__file__).resolve() != CLIENT_ROOT/'agent/agent_tracker/__init__.py':
+    raise RuntimeError('Smoke test imported another client checkout')
 from agent_tracker.installer import install
 from agent_tracker.core.files import read_json,atomic_json
 from agent_tracker.core.release_manager import ReleaseManager,release_path,executable_name
@@ -19,6 +23,11 @@ from smoke_helpers import (run_frozen, stop_tree, assert_ui_payload, assert_ui_h
 from release import file_digest
 from agent_tracker.core.event_queue import EventQueue
 from agent_tracker.core.client import ClientState
+
+if any(not Path(module.__file__).resolve().is_relative_to(CLIENT_ROOT/'agent')
+       for name, module in tuple(sys.modules.items())
+       if name.startswith('agent_tracker.') and getattr(module, '__file__', None)):
+    raise RuntimeError('Smoke test mixed client checkout imports')
 
 
 def run_installed(root, env, upgrade=None):

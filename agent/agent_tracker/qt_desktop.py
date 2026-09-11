@@ -16,16 +16,57 @@ from .runtime import Worker
 
 os.environ.setdefault('QT_QUICK_BACKEND', 'software')
 os.environ.setdefault('QT_QUICK_CONTROLS_STYLE', 'Fusion')
-from .ui.quick.qt import QObject, Property, QTimer, QUrl, QIcon, QFont, QFontDatabase, QApplication, QSystemTrayIcon, QMenu, QQmlApplicationEngine, QCoreApplication, QEvent
+from .ui.quick.qt import QObject, Property, Signal, Slot, Qt, QTimer, QUrl, QIcon, QFont, QFontDatabase, QApplication, QSystemTrayIcon, QMenu, QQmlApplicationEngine, QCoreApplication, QEvent
 from .ui.quick.bridge import Bridge
 
 
+def system_dark(app):
+    hints = app.styleHints()
+    if hasattr(hints, 'colorScheme') and hasattr(Qt, 'ColorScheme'):
+        scheme = hints.colorScheme()
+        if scheme != Qt.ColorScheme.Unknown:
+            return scheme == Qt.ColorScheme.Dark
+    # Qt 5 on Windows does not expose the live application color scheme.
+    if sys.platform == 'win32':
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize') as key:
+                return not bool(winreg.QueryValueEx(key, 'AppsUseLightTheme')[0])
+        except OSError:
+            pass
+    return app.palette().window().color().lightness() < 128
+
+
+def appearance_colors(dark):
+    return dict(
+        dark=dark,
+        background='#1c1c1e' if dark else '#ffffff',
+        surface='#252527' if dark else '#f5f7fa',
+        hover='#303033' if dark else '#ebeff4',
+        border='#454548' if dark else '#dce2e9',
+        text='#f3f3f4' if dark else '#182333',
+        muted='#b6b6bd' if dark else '#536171',
+        accent='#78baff' if dark else '#0878db',
+        selected='#25384b' if dark else '#e6f1fe',
+        primary='#0878db', primaryHover='#076bc4', primaryPressed='#095da9',
+        success='#70d7a7' if dark else '#208b65',
+        warning='#ecc780' if dark else '#805b2e',
+        icon='white' if dark else 'neutral',
+    )
+
+
 class Desktop(QObject):
+    appearanceChanged = Signal()
+
     def __init__(self, client, company_code='', install=None, preview=False, headless=False):
         super().__init__()
         self.app = QApplication.instance() or QApplication(sys.argv[:1])
         self.app.setApplicationName('SOFT Tracking')
         self.app.setQuitOnLastWindowClosed(preview)
+        self._colors = appearance_colors(system_dark(self.app))
+        self.app.paletteChanged.connect(self.refreshAppearance)
+        if hasattr(self.app.styleHints(), 'colorSchemeChanged'):
+            self.app.styleHints().colorSchemeChanged.connect(self.refreshAppearance)
         if self.app.platformName() == 'offscreen' and os.name == 'nt':
             for filename in ('segoeui.ttf', 'seguisb.ttf', 'segoeuib.ttf'):
                 QFontDatabase.addApplicationFont(str(Path(os.environ['WINDIR']) / 'Fonts' / filename))
@@ -42,6 +83,8 @@ class Desktop(QObject):
         if not self.engine.rootObjects():
             raise RuntimeError('Qt Quick interface could not be loaded')
         self.window = self.engine.rootObjects()[0]
+        self.bridge.guideRequested.connect(self.showGuide)
+        self.bridge.stopAuthorized.connect(self.authorizedStop)
         self.app.setWindowIcon(QIcon(str(Path(__file__).parent / 'assets/app.ico')))
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
@@ -49,13 +92,14 @@ class Desktop(QObject):
         if not headless and QSystemTrayIcon.isSystemTrayAvailable():
             self.tray = QSystemTrayIcon(self.app.windowIcon(), self)
             menu = QMenu()
-            menu.addAction(self.bridge.view['labels']['open'], self.show)
-            menu.addAction(self.bridge.view['labels']['help'], lambda: self.bridge.open('guide'))
+            self.open_action = menu.addAction(self.bridge.view['labels']['open'], self.show)
+            self.guide_action = menu.addAction(self.bridge.view['labels']['guide'], self.showGuide)
             self.tray.setContextMenu(menu)
             self.tray.setToolTip('SOFT Tracking')
             self.tray.activated.connect(lambda reason: self.show() if reason == QSystemTrayIcon.Trigger else None)
             self.tray.show()
             self.menu = menu
+            self.bridge.changed.connect(self.refreshTray)
         if self.worker:
             self.worker.start()
 
@@ -63,12 +107,36 @@ class Desktop(QObject):
     def hideOnClose(self):
         return not self.preview
 
+    @Property('QVariantMap', notify=appearanceChanged)
+    def colors(self):
+        return self._colors
+
+    def refreshAppearance(self, *_):
+        colors = appearance_colors(system_dark(self.app))
+        if colors != self._colors:
+            self._colors = colors
+            self.appearanceChanged.emit()
+
+    def refreshTray(self):
+        self.open_action.setText(self.bridge.view['labels']['open'])
+        self.guide_action.setText(self.bridge.view['labels']['guide'])
+
+    @Slot()
+    def showGuide(self):
+        self.window.setProperty('page', 3)
+        self.show()
+
+    @Slot()
+    def authorizedStop(self):
+        self.closing = True
+
     def show(self):
         self.window.show()
         self.window.raise_()
         self.window.requestActivate()
 
     def tick(self):
+        self.refreshAppearance()
         if self.install:
             stop = read_json(self.install / 'stop-request.json', {})
             if stop.get('token') and stop['token'] == os.environ.get('SOFT_TRACKING_RUN_TOKEN'):
@@ -90,6 +158,9 @@ class Desktop(QObject):
     def stop(self):
         self.timer.stop()
         self.bridge.timer.stop()
+        self.app.paletteChanged.disconnect(self.refreshAppearance)
+        if hasattr(self.app.styleHints(), 'colorSchemeChanged'):
+            self.app.styleHints().colorSchemeChanged.disconnect(self.refreshAppearance)
         if self.tray:
             self.tray.hide()
         if self.worker:
@@ -126,7 +197,7 @@ def main(argv=None):
     parser.add_argument('--preview', action='store_true')
     parser.add_argument('--language', default='ru', choices=['ru','en','cs','uz'])
     parser.add_argument('--screenshot')
-    parser.add_argument('--page', type=int, default=0, choices=[0,1,2])
+    parser.add_argument('--page', type=int, default=0, choices=[0,1,2,3])
     parser.add_argument('--unregistered', action='store_true')
     parser.add_argument('--preview-width', type=int, default=960)
     parser.add_argument('--preview-height', type=int, default=720)

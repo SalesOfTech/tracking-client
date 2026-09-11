@@ -1,14 +1,15 @@
 name: Build client candidates
 
 # Candidates only. Real 3.1.0/3.0.4 upgrade acceptance stays in the private repo.
-# Manual prerelease delivery only; no tag trigger, production promotion or private PAT.
+# Stable payload versions are allowed; candidate delivery is still a prerelease.
+# No tag trigger, production promotion or private PAT. See tools/release-plan-3.2.0.md.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: Candidate version (not a production release)
+        description: Payload version (3.2.0); candidate publication is not release approval
         required: true
-        default: 3.2.0-rc.1
+        default: 3.2.0
         type: string
 
 permissions:

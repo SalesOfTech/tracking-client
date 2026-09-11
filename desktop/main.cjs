@@ -24,6 +24,7 @@ const index = fs.realpathSync.native(path.join(__dirname, 'dist', 'index.html'))
 const page = pathToFileURL(index).href;
 app.setName('SOFT Tracking');
 app.setAppUserModelId('com.soft.tracking');
+nativeTheme.themeSource = 'system';
 // The Python parent owns the durable runtime; there is no listening TCP port.
 function request(action, input = {}) {
   validate(action, input);
@@ -73,9 +74,7 @@ function authorized(event) {
 ipcMain.handle('tracking:command', async (event, action, input) => {
   if (!authorized(event)) {healthPhase('ipc-unauthorized'); throw Error('unauthorized');}
   validate(action, input);
-  if (action === 'preferences' && input.theme) nativeTheme.themeSource = input.theme;
   const result = await request(action, input);
-  if (action === 'status' && result.theme) nativeTheme.themeSource = result.theme;
   if (action === 'ready' && health) {closing = true; setImmediate(() => app.quit());}
   return result;
 });
@@ -94,7 +93,7 @@ app.whenReady().then(() => {
   window = new BrowserWindow({
     width: mode === 'installer' ? 560 : 1024, height: mode === 'installer' ? 610 : 760,
     minWidth: mode === 'installer' ? 480 : 700, minHeight: mode === 'installer' ? 560 : 560,
-    frame: false, show: false, resizable: mode !== 'installer', backgroundColor: nativeTheme.shouldUseDarkColors ? '#17191c' : '#ffffff',
+    frame: process.platform !== 'win32', title: 'SOFT Tracking', show: false, resizable: mode !== 'installer', backgroundColor: nativeTheme.shouldUseDarkColors ? '#191b1f' : '#ffffff',
     icon: path.join(__dirname, 'brand.png'),
     webPreferences: {preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, devTools: !app.isPackaged},
   });
@@ -119,6 +118,9 @@ app.whenReady().then(() => {
   }
   window.once('ready-to-show', () => {healthPhase('page-ready'); if (!health && !hidden) window.show();});
   window.loadFile(index, {query: {mode}});
+});
+nativeTheme.on('updated', () => {
+  if (window && !window.isDestroyed()) window.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#191b1f' : '#ffffff');
 });
 app.on('activate', () => {window?.show(); window?.focus();});
 app.on('window-all-closed', () => {if (closing) app.quit();});

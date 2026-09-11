@@ -144,6 +144,10 @@ def upgrade_existing(bundle,root,language='',integrate=True,health_check=None):
             manifest=verify_manifest(read_json(bundle/'manifest.json'),manager.keys,'0.0.0',build['os'],build['architecture'])
             if manifest['target']!=build['target']:
                 raise InstallerError('setup_wrong_target')
+            # Re-running setup also repairs login startup for existing installs.
+            # The stable launcher is retained even if the candidate rolls back.
+            if integrate:
+                autostart(launcher, True)
             if Version(manifest['version'])<=Version(active['version']):
                 return launcher
             staged=manager.stage(bundle/'release.zip',manifest)
@@ -186,7 +190,10 @@ def install(bundle, root, company_code, integrate=True, language="", company_res
         existing=read_json(root / "enrollment.json",{})
         check_existing_company(root, existing, company_code, resolver)
         if (root / "current.json").exists():
-            return installed_launcher(root)
+            launcher = installed_launcher(root)
+            if integrate:
+                autostart(launcher, True)
+            return launcher
         build=read_json(bundle / "setup-build.json")
         target_os,arch=runtime_target()
         envelope=read_json(bundle / "manifest.json")
