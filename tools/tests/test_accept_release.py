@@ -307,6 +307,45 @@ class GateTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 gate.accepted_jobs(api, self.plan)
 
+    def test_smoke_diagnostics_emit_only_fixed_stage_and_keep_failure_closed(self):
+        gate.private_root().mkdir()
+        cases = (
+            ('AssertionError: Original installed launcher did not start the application', 'old-launcher-startup'),
+            ('AssertionError: New frozen version failed its health check', 'new-frozen-health'),
+            ('AssertionError: private-value', 'subprocess-failure'),
+            ('AssertionError: New frozen version failed its health check private-value', 'subprocess-failure'),
+        )
+        for diagnostic, stage in cases:
+            output = io.StringIO()
+            def fail(_command, **options):
+                options['stdout'].write(('private-value\n::error::private-value\n' + diagnostic + '\n').encode())
+                raise subprocess.CalledProcessError(1, ['private-value'])
+            with patch.dict(os.environ, {'RELEASE_TARGET': gate.TARGETS[0]['target']}), \
+                    patch.object(gate, 'hosted_context'), patch.object(gate, 'check_native'), \
+                    patch.object(gate.sys, 'argv', ['accept_release.py', 'test']), \
+                    patch.object(gate.subprocess, 'run', side_effect=fail) as run, redirect_stdout(output):
+                self.assertEqual(gate.main(), 1)
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(output.getvalue(), gate.TARGETS[0]['target'] + ' 3.2.0 upgrade-3.1.0-' + stage + ' FAIL\n')
+
+    def test_smoke_timeout_is_fixed_enum_without_command_or_output(self):
+        gate.private_root().mkdir()
+        output = io.StringIO()
+        with patch.dict(os.environ, {'RELEASE_TARGET': gate.TARGETS[0]['target']}), \
+                patch.object(gate, 'hosted_context'), patch.object(gate, 'check_native'), \
+                patch.object(gate.sys, 'argv', ['accept_release.py', 'test']), \
+                patch.object(gate.subprocess, 'run', side_effect=subprocess.TimeoutExpired('private-value', 1200)) as run, \
+                redirect_stdout(output):
+            self.assertEqual(gate.main(), 1)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(output.getvalue(), gate.TARGETS[0]['target'] + ' 3.2.0 upgrade-3.1.0-process-timeout FAIL\n')
+
+    def test_smoke_diagnostics_read_bounded_tail_and_missing_file_is_generic(self):
+        path = self.root / 'private.log'
+        path.write_bytes(b'AssertionError: New frozen version failed its health check\n' + b'x' * 65537)
+        self.assertEqual(gate.smoke_failure_stage(path), 'subprocess-failure')
+        self.assertEqual(gate.smoke_failure_stage(self.root / 'absent.log'), 'subprocess-failure')
+
     def signed_bundle(self, mutate=None):
         row = gate.TARGETS[0]
         metadata = {'version': '3.2.0', 'target': row['target'], 'os': 'windows', 'architecture': 'x64',

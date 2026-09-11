@@ -432,6 +432,31 @@ def smoke_environment(root):
     return env
 
 
+def smoke_failure_stage(path):
+    stages = {
+        'AssertionError: Original installed launcher did not start the application': 'old-launcher-startup',
+        'AssertionError: New frozen version failed its health check': 'new-frozen-health',
+        'AssertionError: Application did not shut down gracefully': 'launcher-shutdown',
+        'AssertionError: Graceful shutdown left child processes running': 'child-shutdown',
+        'AssertionError: Ready marker was written without a running packaged Electron child': 'electron-child',
+        'AssertionError: Electron renderer/RPC health was not confirmed': 'renderer-health',
+        'AssertionError: Upgrade replaced the original bootstrap': 'bootstrap-retention',
+        'agent_tracker.installer.InstallerError: setup_upgrade_failed': 'installer-health',
+        'agent_tracker.installer.InstallerError: setup_close_required': 'installer-stop',
+    }
+    try:
+        # Only map exact known diagnostics to constants; never emit captured text.
+        with Path(path).open('rb') as log:
+            log.seek(max(0, log.seek(0, os.SEEK_END) - 65536))
+            lines = log.read(65536).decode('utf-8', errors='replace').splitlines()
+        for line in reversed(lines):
+            if line in stages:
+                return stages[line]
+    except OSError:
+        pass
+    return 'subprocess-failure'
+
+
 def test():
     global STAGE
     plan, row = read_plan(), row_for_target()
@@ -440,11 +465,19 @@ def test():
     env = smoke_environment(root)
     for old in upgrade_baselines(VERSION):
         STAGE = 'upgrade-' + old
-        with (root / (old + '.private.log')).open('wb') as log:
-            subprocess.run([sys.executable, str(ROOT / 'tools/smoke_update.py'), str(root / old),
-                            str(root / 'current'), '--published'], env=env, cwd=root,
-                           stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-                           timeout=1200, check=True)
+        path = root / (old + '.private.log')
+        try:
+            with path.open('wb') as log:
+                subprocess.run([sys.executable, str(ROOT / 'tools/smoke_update.py'), str(root / old),
+                                str(root / 'current'), '--published'], env=env, cwd=root,
+                               stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                               timeout=1200, check=True)
+        except subprocess.CalledProcessError:
+            STAGE += '-' + smoke_failure_stage(path)
+            raise
+        except subprocess.TimeoutExpired:
+            STAGE += '-process-timeout'
+            raise
         print(row['target'] + ' ' + old + ' PASS', flush=True)
 
 
