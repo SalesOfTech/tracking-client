@@ -19,7 +19,8 @@ const parentInput = process.platform === 'win32' ? fs.createReadStream(null, {fd
 let window, tray, closing = false, sequence = 0, buffer = '';
 let parentNotified = false;
 const pending = new Map();
-const index = path.join(__dirname, 'dist', 'index.html');
+// PyInstaller can use an 8.3 extraction path; Chromium expands it before IPC.
+const index = fs.realpathSync.native(path.join(__dirname, 'dist', 'index.html'));
 const page = pathToFileURL(index).href;
 app.setName('SOFT Tracking');
 app.setAppUserModelId('com.soft.tracking');
