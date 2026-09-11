@@ -422,11 +422,16 @@ def download():
 def smoke_environment(root):
     allowed = {'PATH', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT', 'DISPLAY', 'XAUTHORITY',
                'LANG', 'LC_ALL', 'DBUS_SESSION_BUS_ADDRESS', 'USER', 'USERNAME', 'LOGNAME'}
+    if sys.platform == 'win32':
+        # Windows resolves native known folders from USERPROFILE, not just APPDATA.
+        allowed.add('USERPROFILE')
     env = {name: value for name, value in os.environ.items() if name.upper() in allowed}
+    if sys.platform == 'win32':
+        require(bool(env.get('USERPROFILE')))
     home, temporary = root / 'home', root / 'tmp'
     home.mkdir(exist_ok=True)
     temporary.mkdir(exist_ok=True)
-    env.update(HOME=str(home), USERPROFILE=str(home), TMP=str(temporary), TEMP=str(temporary),
+    env.update(HOME=str(home), TMP=str(temporary), TEMP=str(temporary),
                TMPDIR=str(temporary), APPDATA=str(home), LOCALAPPDATA=str(home),
                TRACKING_SMOKE_CLIENT_ROOT=str(ROOT / 'candidate'), PYTHONNOUSERSITE='1')
     return env

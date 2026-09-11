@@ -272,6 +272,42 @@ class GateTests(unittest.TestCase):
             self.assertEqual(options['env']['TRACKING_SMOKE_CLIENT_ROOT'], str(gate.ROOT / 'candidate'))
             self.assertEqual(call.args[0][-1], '--published')
 
+    def test_windows_smoke_preserves_native_profile_but_isolates_writable_paths(self):
+        host = {'USERPROFILE': r'C:\Users\fixture', 'HOME': r'C:\Users\fixture',
+                'APPDATA': r'C:\Users\fixture\AppData\Roaming',
+                'LOCALAPPDATA': r'C:\Users\fixture\AppData\Local', 'TEMP': r'C:\host-temp',
+                'TRACKING_BASELINE_URLS': 'private-value', 'GH_TOKEN': 'private-value',
+                'GITHUB_TOKEN': 'private-value', 'ACTIONS_RUNTIME_TOKEN': 'private-value',
+                'SSH_AUTH_SOCK': 'private-value', 'NODE_OPTIONS': 'private-value',
+                'PYTHONPATH': 'private-value', 'PYTHONOPTIMIZE': '1', 'ELECTRON_ENABLE_LOGGING': '1'}
+        with patch.dict(os.environ, host, clear=True), patch.object(gate.sys, 'platform', 'win32'):
+            env = gate.smoke_environment(self.root)
+        self.assertEqual(env['USERPROFILE'], host['USERPROFILE'])
+        for name in ('HOME', 'APPDATA', 'LOCALAPPDATA'):
+            self.assertEqual(env[name], str(self.root / 'home'))
+        for name in ('TMP', 'TEMP', 'TMPDIR'):
+            self.assertEqual(env[name], str(self.root / 'tmp'))
+        self.assertNotIn('private-value', env.values())
+        self.assertNotIn('PYTHONOPTIMIZE', env)
+        self.assertNotIn('ELECTRON_ENABLE_LOGGING', env)
+        self.assertEqual(env['TRACKING_SMOKE_CLIENT_ROOT'], str(gate.ROOT / 'candidate'))
+        self.assertTrue((self.root / 'home').is_dir())
+        self.assertTrue((self.root / 'tmp').is_dir())
+
+    def test_windows_smoke_requires_native_profile_and_never_invents_one(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(gate.sys, 'platform', 'win32'), \
+                self.assertRaises(ValueError):
+            gate.smoke_environment(self.root)
+
+    def test_posix_smoke_keeps_isolated_home_without_windows_profile(self):
+        for platform in ('linux', 'darwin'):
+            with patch.dict(os.environ, {'USERPROFILE': 'host-profile', 'HOME': 'host-home'}, clear=True), \
+                    patch.object(gate.sys, 'platform', platform):
+                env = gate.smoke_environment(self.root)
+            self.assertEqual(env['HOME'], str(self.root / 'home'))
+            self.assertNotIn('USERPROFILE', env)
+            self.assertNotIn('host-profile', env.values())
+
     def test_smoke_failure_stops_second_baseline_and_is_sanitized(self):
         gate.private_root().mkdir()
         output = io.StringIO()
