@@ -12,6 +12,19 @@ from agent_tracker.electron_desktop import Controller, serve, validate
 
 
 class ElectronControllerTests(unittest.TestCase):
+    def test_only_explicit_health_checks_expose_native_startup_diagnostics(self):
+        for health in (False, True):
+            child = Mock()
+            child.stdin, child.stdout = io.BytesIO(), io.BytesIO()
+            child.poll.return_value = 1
+            child.returncode = 1
+            with self.subTest(health=health), \
+                    patch('agent_tracker.electron_desktop.restore_links'), \
+                    patch('agent_tracker.electron_desktop.electron_path', return_value=Mock(is_file=lambda: True)), \
+                    patch('agent_tracker.electron_desktop.subprocess.Popen', return_value=child) as spawn:
+                self.assertEqual(serve(Controller(health=health), Path('electron')), 1)
+                self.assertEqual(spawn.call_args.kwargs['stderr'], None if health else subprocess.DEVNULL)
+
     def test_closing_notification_releases_inherited_pipe(self):
         controller = Controller(health=True)
         child = Mock()

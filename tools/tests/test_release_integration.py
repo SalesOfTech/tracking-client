@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import stat
+from contextlib import nullcontext
 from pathlib import Path
 import sys
 import tempfile
@@ -17,6 +18,7 @@ sys.path.insert(0, str(ROOT/'tools'))
 from tools import ci, release
 from smoke_helpers import assert_ui_health, assert_ui_payload
 from agent_tracker.electron_links import MAP_NAME, restore_links
+from agent_tracker import electron_links
 from agent_tracker.core.signed_updates import stage_archive
 
 
@@ -253,17 +255,36 @@ class ReleaseIntegrationTests(unittest.TestCase):
         self.symlink(framework/'Resources', 'Versions/Current/Resources', directory=True)
         return source, framework.relative_to(source)
 
+    def macos_source_links(self):
+        # The source fixture uses POSIX link spelling even on Windows; restoration
+        # outside this context must still use the real host's native link spelling.
+        if os.name == 'nt':
+            return patch.object(electron_links, '_native_target', side_effect=lambda target: target)
+        return nullcontext()
+
+    def test_macos_source_fixture_does_not_change_native_restoration_semantics(self):
+        target = 'Versions/Current/Example'
+        with self.macos_source_links():
+            self.assertEqual(electron_links._native_target(target), target)
+        self.assertEqual(electron_links._native_target(target), target.replace('/', os.sep))
+
     def test_internal_framework_aliases_become_regular_map_without_duplicate_files(self):
         source, framework = self.framework()
         destination = self.root/'flat'
-        release.copy_electron(source, destination)
+        with self.macos_source_links():
+            release.copy_electron(source, destination)
         self.assertFalse(os.path.lexists(destination/framework/'Example'))
         self.assertFalse(os.path.lexists(destination/framework/'Versions/Current'))
         self.assertTrue((destination/framework/'Versions/A/Example').is_file())
         document = json.loads((destination/MAP_NAME).read_text())
         self.assertEqual(len(document['links']), 3)
+        self.assertEqual({entry['target'] for entry in document['links']},
+                         {'A', 'Versions/Current/Example', 'Versions/Current/Resources'})
         self.assertTrue(all(not item.is_symlink() for item in destination.rglob('*')))
         restore_links(destination)
+        restore_links(destination)
+        for entry in document['links']:
+            self.assertEqual(os.readlink(destination/entry['path']), entry['target'].replace('/', os.sep))
         self.assertEqual((destination/framework/'Example').read_bytes(), b'binary' * 10000)
         self.assertEqual(os.readlink(destination/framework/'Versions/Current'), 'A')
 
@@ -303,7 +324,8 @@ class ReleaseIntegrationTests(unittest.TestCase):
     def test_deduplicated_regular_zip_stages_under_unchanged_extractor_bounds_then_restores(self):
         source, framework = self.framework()
         payload = self.root/'payload'
-        release.copy_electron(source, payload/'app/electron')
+        with self.macos_source_links():
+            release.copy_electron(source, payload/'app/electron')
         archive = self.root/'release.zip'
         release.write_payload_archive(payload, archive)
         self.assertEqual(release.TRANSITION_ARCHIVE_BYTES, 250 * 1024 * 1024)

@@ -227,7 +227,7 @@ def serve(controller, folder, hidden=False):
                SOFT_TRACKING_UI_HIDDEN='1' if hidden else '0')
     env.pop('ELECTRON_RUN_AS_NODE', None)
     child = subprocess.Popen([str(executable)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                             stderr=subprocess.DEVNULL, env=env,
+                             stderr=None if controller.health else subprocess.DEVNULL, env=env,
                              creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
     incoming = queue.Queue(maxsize=32)
     def receive():

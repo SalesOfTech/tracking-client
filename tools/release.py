@@ -201,6 +201,43 @@ def keygen(path,key_id):
     atomic_json(path.with_suffix(".public.json"),{key_id:public})
 
 
+def setup_payload_spec(entry, name, data, excludes, *, macos):
+    opaque = []
+    destinations = set()
+    for source, target in data:
+        source = Path(source)
+        for file in sorted(source.rglob('*')) if source.is_dir() else [source]:
+            if file.is_symlink():
+                raise ValueError('Installer payload must contain regular files, not symlinks')
+            if file.is_dir():
+                continue
+            if not stat.S_ISREG(file.stat().st_mode):
+                raise ValueError('Installer payload must contain only regular files')
+            relative = file.relative_to(source) if source.is_dir() else Path(file.name)
+            destination = (Path(target) / relative).as_posix()
+            if destination.casefold() in destinations:
+                raise ValueError('Duplicate installer payload destination')
+            destinations.add(destination.casefold())
+            opaque.append((destination, str(file.resolve()), 'DATA'))
+    # Adding after Analysis preserves the independent Electron bundle, bypassing
+    # ELF/Mach-O rewriting. PKG still preserves executable bits for DATA entries.
+    lines = [
+        'a = Analysis(' + repr([str(ROOT / 'agent' / entry)]) + ',',
+        '    pathex=' + repr([str(ROOT / 'agent')]) + ',',
+        "    binaries=[], datas=[], hiddenimports=['_cffi_backend'],",
+        '    hookspath=[], runtime_hooks=[], excludes=' + repr(excludes) + ',',
+        '    noarchive=False, optimize=0)',
+        'a.datas += ' + repr(opaque),
+        'pyz = PYZ(a.pure)',
+        'exe = EXE(pyz, a.scripts, a.binaries, a.datas, [],',
+        '    name=' + repr(name) + ', debug=False, bootloader_ignore_signals=False,',
+        '    strip=False, upx=False, console=' + repr(not macos) + ')',
+    ]
+    if macos:
+        lines.append('app = BUNDLE(exe, name=' + repr(name + '.app') + ', icon=None, bundle_identifier=None)')
+    return '\n'.join(lines) + '\n'
+
+
 def freeze(entry,name,dist,work,data=(),console=False,ui=None):
     ui = ui or os.environ.get('SOFT_TRACKING_UI', 'qt')
     if ui not in ('electron', 'qt'):
@@ -215,6 +252,15 @@ def freeze(entry,name,dist,work,data=(),console=False,ui=None):
             args.extend(['--exclude-module', module])
     if ui == 'electron':
         args.extend(['--exclude-module', 'tkinter', '--exclude-module', '_tkinter'])
+    if platform.system() in ('Darwin', 'Linux') and entry == 'setup_entry.py' and ui == 'electron':
+        excludes = [args[index + 1] for index, value in enumerate(args) if value == '--exclude-module']
+        spec = work / (name + '.spec')
+        work.mkdir(parents=True, exist_ok=True)
+        spec.write_text(setup_payload_spec(entry, name, data, excludes,
+                                          macos=platform.system() == 'Darwin'), encoding='utf-8')
+        subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm',
+                        '--distpath', str(dist), '--workpath', str(work / name), str(spec)], check=True)
+        return
     if not console and platform.system() in ("Windows","Darwin"):
         args.append("--windowed")
     if os.name=="nt":

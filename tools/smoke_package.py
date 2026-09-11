@@ -47,7 +47,11 @@ def main(bundle):
             before = (root/'current.json').read_bytes()
             result = run_frozen([str(installer), '--health-check'],
                                 env=dict(env, SOFT_TRACKING_HEALTH=str(setup_health)), timeout=120)
-            assert result.returncode == 0 and setup_health.exists(), 'Frozen installer Electron renderer did not pass health check'
+            if result.returncode != 0 or not setup_health.exists():
+                raise RuntimeError(
+                    'Frozen installer Electron renderer health check failed '
+                    '(exit {}): {}'.format(result.returncode,
+                                          result.stderr.decode(errors='replace')[-8000:]))
             assert_ui_health(setup_health, metadata)
             assert (root/'current.json').read_bytes() == before, 'Installer health check changed the installation'
         payload=b'{"action":"status"}'

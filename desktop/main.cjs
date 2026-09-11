@@ -30,7 +30,9 @@ function request(action, input = {}) {
   const id = ++sequence;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {pending.delete(id); reject(Error('server_unavailable'));}, 35000);
-    pending.set(id, {resolve, reject, timer});
+    pending.set(id, {resolve, reject, timer, action});
+    if (action === 'status') healthPhase('request-status');
+    if (action === 'ready') healthPhase('request-ready');
     process.stdout.write(JSON.stringify({id, action, input}) + '\n');
   });
 }
@@ -49,6 +51,8 @@ parentInput.on('data', chunk => {
     const call = pending.get(response.id);
     if (!call) continue;
     pending.delete(response.id); clearTimeout(call.timer);
+    if (call.action === 'status') healthPhase(response.ok ? 'response-status-ok' : 'response-status-error');
+    if (call.action === 'ready') healthPhase(response.ok ? 'response-ready-ok' : 'response-ready-error');
     response.ok ? call.resolve(response.data) : call.reject(Error(response.error || 'connect_failed'));
   }
 });
@@ -66,7 +70,7 @@ function authorized(event) {
   return window && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame && event.senderFrame.url.split('?')[0] === page;
 }
 ipcMain.handle('tracking:command', async (event, action, input) => {
-  if (!authorized(event)) throw Error('unauthorized');
+  if (!authorized(event)) {healthPhase('ipc-unauthorized'); throw Error('unauthorized');}
   validate(action, input);
   if (action === 'preferences' && input.theme) nativeTheme.themeSource = input.theme;
   const result = await request(action, input);
