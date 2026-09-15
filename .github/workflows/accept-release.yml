@@ -130,6 +130,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python tools/accept_release.py promote
+      - name: Publish byte-identical runtime delivery on GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DELIVERY_VERSION: '3.2.0'
+        run: python tools/delivery.py
       - name: Remove temporary public verification downloads
         if: always()
         run: python tools/accept_release.py cleanup
