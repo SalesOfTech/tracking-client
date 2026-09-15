@@ -68,7 +68,8 @@ def main():
     try:
         current = json.loads(gh('release', 'view', tag, '--repo', repo, '--json', 'isDraft,assets'))
     except subprocess.CalledProcessError:
-        gh('release', 'create', tag, '--repo', repo, '--target', 'v' + version, '--draft', '--prerelease',
+        commit = gh('api', 'repos/' + repo + '/commits/v' + version, '--jq', '.sha').strip()
+        gh('release', 'create', tag, '--repo', repo, '--target', commit, '--draft', '--prerelease',
            '--title', 'Runtime delivery ' + version, '--notes',
            'Byte-identical installers and signed update payloads from v' + version + '. No compilation or customer data. Storage on GitHub only.')
         current = {'isDraft': True, 'assets': []}
