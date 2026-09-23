@@ -112,6 +112,8 @@ class GitHub:
 
     def request(self, path, method='GET', **options):
         require(path.startswith('repos/' + self.repo + '/'))
+        if method == 'GET':
+            options['params'] = {'fresh': str(time.time_ns())}
         with requests.Session() as session:
             session.trust_env = False
             response = session.request(method, 'https://api.github.com/' + path,
@@ -144,6 +146,7 @@ class GitHub:
             session.trust_env = False
             with session.get(f'https://api.github.com/repos/{self.repo}/releases/assets/{identifier}',
                              headers={'Authorization': 'Bearer ' + self.token, 'Accept': 'application/octet-stream'},
+                             params={'fresh': str(time.time_ns())},
                              stream=True, timeout=(15, 60), allow_redirects=False) as response:
                 if response.status_code == 302:
                     download_url(response.headers['Location'], destination, expected, size)
