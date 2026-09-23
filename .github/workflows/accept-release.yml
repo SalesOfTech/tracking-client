@@ -102,7 +102,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y xvfb xauth x11-utils xprintidle libx11-6 libegl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-keysyms1 libxcb-icccm4 libgtk-3-0 libnss3 libgbm1 libasound2 libxss1 libatk-bridge2.0-0
-      - name: Both genuine published upgrades with all existing smoke assertions
+      - name: All genuine published upgrades with all existing smoke assertions
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
             xvfb-run -a python tools/accept_release.py test

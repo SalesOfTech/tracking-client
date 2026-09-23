@@ -32,7 +32,7 @@ VERSION = os.environ.get('ACCEPTANCE_VERSION', '3.2.0')
 if not re.fullmatch(r'\d+\.\d+\.\d+', VERSION):
     raise ValueError('Stable acceptance version required')
 ENVIRONMENT = 'tracking-release-acceptance'
-SMOKE_STEP = 'Both genuine published upgrades with all existing smoke assertions'
+SMOKE_STEP = 'All genuine published upgrades with all existing smoke assertions'
 MAX_BUNDLE = 2 * 1024 ** 3 - 1
 ASSET_HOST = 'release-assets.githubusercontent.com'
 STAGE = 'preflight'
@@ -545,7 +545,7 @@ def promote():
         require(tag is not None and release.get('draft') is True and release.get('tag_name') == 'v' + VERSION)
     root = private_root()
     root.mkdir(mode=0o700)
-    body = ('Stable ' + VERSION + ' binaries. All eight native targets and both genuine baseline upgrades per target passed. '
+    body = ('Stable ' + VERSION + ' binaries. All eight native targets and all required genuine baseline upgrades per target passed. '
             'Candidate source: ' + plan['candidate_sha'] + '. Harness: ' + plan['harness_sha'] + '. '
             'Dispatch actor: ' + plan['dispatch_actor'] + '. Triggering actor: ' + plan['triggering_actor'] + '. '
             'Candidate: ' + plan['candidate_tag'] + ', Release ID ' + str(plan['candidate_release_id']) + '. '

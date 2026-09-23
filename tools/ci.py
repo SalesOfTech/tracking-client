@@ -41,6 +41,8 @@ def upgrade_baselines(release_version, requested=''):
     required = []
     if Version(release_version).release >= (3, 2, 0):
         required = ['3.1.0', '3.0.4']
+        if Version(release_version).release >= (3, 2, 1):
+            required.insert(0, '3.2.0')
     elif not extra:
         required = {'3.0.0': ['3.0.0-beta.7', '3.0.0-beta.9'],
                     '3.0.1': ['3.0.0', '3.0.0-beta.7'],
