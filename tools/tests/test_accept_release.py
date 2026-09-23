@@ -32,6 +32,12 @@ def zipped(files):
 
 
 class GateTests(unittest.TestCase):
+    def test_candidate_identity_uses_selected_stable_version(self):
+        with patch.object(gate, 'VERSION', '3.2.1'):
+            self.assertEqual(gate.candidate_identity('candidate-3.2.1-123-2'), (123, 2))
+            with self.assertRaises(ValueError):
+                gate.candidate_identity('candidate-3.2.0-123-2')
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

@@ -1,7 +1,7 @@
 {
   "name": "soft-tracking-desktop",
   "productName": "SOFT Tracking",
-  "version": "3.2.0",
+  "version": "3.2.1",
   "private": true,
   "type": "module",
   "main": "main.cjs",

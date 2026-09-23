@@ -45,6 +45,8 @@ class ActivityTracker(threading.Thread):
         self._session: Optional[SessionState] = None
         self._pending_event: Optional[Event] = None
         self.last_error = ""
+        self._last_observation = None
+        self._last_poll_clock = None
         self._tracked: Set[str] = set(process.lower() for process in self.cfg.track_processes)
 
     def update_config(self, tracker_config: TrackerConfig) -> None:
@@ -74,12 +76,33 @@ class ActivityTracker(threading.Thread):
         if not self._tracked:
             self._close_session(reason="disabled")
             return
-        idle = self.platform.get_idle_duration_ms()
+        now, clock = current_timestamp(), time.monotonic()
+        gap_limit = max(5, self.cfg.poll_ms / 1000.0 * 3)
+        if self._last_poll_clock is not None and (
+                clock - self._last_poll_clock > gap_limit or now < self._last_observation or
+                abs((now - self._last_observation) - (clock - self._last_poll_clock)) > gap_limit):
+            self._close_session("observation_gap", end_at=self._last_observation)
+        self._last_poll_clock = clock
+        try:
+            if not self.platform.is_session_active():
+                self._close_session("session_inactive", end_at=self._last_observation)
+                self._last_observation = now
+                return
+            idle = self.platform.get_idle_duration_ms()
+            if idle < 0:
+                raise OSError("Invalid idle duration")
+            active = self.platform.get_active_application() if idle < self.cfg.inactivity_ms else None
+        except Exception:
+            self.last_error = "Application collection paused: Windows session state unavailable"
+            self._close_session("platform_unavailable", end_at=self._last_observation)
+            self._last_observation = now
+            return
+        self._last_observation = now
         if idle >= self.cfg.inactivity_ms:
-            self._close_session(reason="idle")
+            cutoff = now - max(0, idle - self.cfg.inactivity_ms) // 1000
+            self._close_session(reason="idle", end_at=cutoff)
             return
 
-        active = self.platform.get_active_application()
         if not active:
             self._close_session(reason="no_active_app")
             return
@@ -155,10 +178,10 @@ class ActivityTracker(threading.Thread):
         LOG.debug("start session for %s", display_name)
         self._session = SessionState(identifier=identifier, display_name=display_name, started_at=now)
 
-    def _close_session(self, reason: str) -> None:
+    def _close_session(self, reason: str, end_at=None) -> None:
         if not self._session:
             return
-        now = current_timestamp()
+        now = max(self._session.started_at, current_timestamp() if end_at is None else end_at)
         duration = max(0, now - self._session.started_at)
         LOG.debug("end session for %s reason=%s duration=%s", self._session.display_name, reason, duration)
         event = Event(

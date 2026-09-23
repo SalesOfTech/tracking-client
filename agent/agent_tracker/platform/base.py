@@ -14,6 +14,9 @@ class ActiveApplication:
 
 
 class PlatformAdapter(abc.ABC):
+    def is_session_active(self) -> bool:
+        return True
+
     @abc.abstractmethod
     def platform_name(self) -> str:
         raise NotImplementedError

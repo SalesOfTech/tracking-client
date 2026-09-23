@@ -28,7 +28,9 @@ from smoke_published import stage_published_archive
 from agent_tracker.core.files import atomic_json
 from agent_tracker.core.target import runtime_target
 
-VERSION = '3.2.0'
+VERSION = os.environ.get('ACCEPTANCE_VERSION', '3.2.0')
+if not re.fullmatch(r'\d+\.\d+\.\d+', VERSION):
+    raise ValueError('Stable acceptance version required')
 ENVIRONMENT = 'tracking-release-acceptance'
 SMOKE_STEP = 'Both genuine published upgrades with all existing smoke assertions'
 MAX_BUNDLE = 2 * 1024 ** 3 - 1
@@ -96,7 +98,7 @@ def baseline_urls(raw):
 
 
 def candidate_identity(tag):
-    match = re.fullmatch(r'candidate-3\.2\.0-([1-9][0-9]*)-([1-9][0-9]*)', tag)
+    match = re.fullmatch(r'candidate-' + re.escape(VERSION) + r'-([1-9][0-9]*)-([1-9][0-9]*)', tag)
     require(match is not None)
     return int(match[1]), int(match[2])
 
@@ -150,7 +152,7 @@ class GitHub:
 
     def upload(self, release_id, path):
         require(type(release_id) is int and release_id > 0)
-        require(re.fullmatch(r'SOFT-Tracking-[a-z0-9-]+-3\.2\.0\.zip(?:\.sha256)?', path.name))
+        require(re.fullmatch(r'SOFT-Tracking-[a-z0-9-]+-' + re.escape(VERSION) + r'\.zip(?:\.sha256)?', path.name))
         with requests.Session() as session, path.open('rb') as stream:
             session.trust_env = False
             with session.post(f'https://uploads.github.com/repos/{self.repo}/releases/{release_id}/assets',
@@ -543,7 +545,7 @@ def promote():
         require(tag is not None and release.get('draft') is True and release.get('tag_name') == 'v' + VERSION)
     root = private_root()
     root.mkdir(mode=0o700)
-    body = ('Normal 3.2.0 binaries. All eight native targets and both genuine baseline upgrades per target passed. '
+    body = ('Stable ' + VERSION + ' binaries. All eight native targets and both genuine baseline upgrades per target passed. '
             'Candidate source: ' + plan['candidate_sha'] + '. Harness: ' + plan['harness_sha'] + '. '
             'Dispatch actor: ' + plan['dispatch_actor'] + '. Triggering actor: ' + plan['triggering_actor'] + '. '
             'Candidate: ' + plan['candidate_tag'] + ', Release ID ' + str(plan['candidate_release_id']) + '. '

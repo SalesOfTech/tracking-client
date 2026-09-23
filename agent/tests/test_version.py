@@ -11,7 +11,7 @@ from agent_tracker.core.version import application_version
 
 class VersionTests(unittest.TestCase):
     def test_source_version_is_stable(self):
-        self.assertEqual('3.2.0', application_version())
+        self.assertEqual('3.2.1', application_version())
 
     def test_frozen_version_belongs_to_running_payload(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -196,6 +196,9 @@ for _language, _values in {
 
 
 for _key, _values in {
+    'legacy_migration_unrecognized': ['Legacy startup is not recognized. Ask your administrator to check it.', 'Не распознан автозапуск старого агента. Нужна проверка администратора.', 'Automatické spuštění starého agenta nebylo rozpoznáno. Požádejte správce o kontrolu.', 'Eski agent avtoishga tushishi aniqlanmadi. Administrator tekshirsin.'],
+    'legacy_migration_denied': ['Could not replace the old agent for this Windows account. Check permissions and retry.', 'Не удалось заменить старый агент этой учётной записи Windows. Проверьте права и повторите.', 'Starého agenta tohoto účtu Windows nelze nahradit. Zkontrolujte oprávnění a opakujte akci.', 'Ushbu Windows hisobi eski agentini almashtirib bo‘lmadi. Ruxsatlarni tekshiring va qayta urining.'],
+    'legacy_migration_changed': ['The old installation changed during replacement. Ask your administrator to check it before retrying.', 'Старая установка изменилась во время замены. Перед повтором нужна проверка администратора.', 'Stará instalace se během nahrazování změnila. Před opakováním požádejte správce o kontrolu.', 'Almashtirish paytida eski o‘rnatish o‘zgardi. Qayta urinishdan oldin administrator tekshirsin.'],
     'check_connection': ['Check connection', 'Проверить связь', 'Ověřit připojení', 'Ulanishni tekshirish'],
     'inventory_only': ['Only application inventory is enabled', 'Включён только сбор списка программ', 'Zapnutý je pouze seznam aplikací', 'Faqat dasturlar ro‘yxati yig‘iladi'],
     'browser_storage_error': ['Extension storage error', 'Ошибка хранилища расширения', 'Chyba úložiště rozšíření', 'Kengaytma xotirasi xatosi'],

@@ -33,6 +33,9 @@ class Response:
 
 class ReleaseTests(unittest.TestCase):
     def setUp(self):
+        migration = patch('agent_tracker.legacy_migration.replace_current_user')
+        self.migration = migration.start()
+        self.addCleanup(migration.stop)
         self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)/'install';self.root.mkdir()
         self.key=SigningKey.generate()
         public=base64.b64encode(bytes(self.key.verify_key)).decode()
@@ -160,6 +163,7 @@ class ReleaseTests(unittest.TestCase):
                 patch('agent_tracker.installer.shortcuts'), patch.object(integration, '_system', return_value='linux'), \
                 patch.object(integration, '_startup_path', return_value=startup):
             launcher = install(bundle, root, 'a'*32)
+            self.migration.assert_called_once_with(root)
             self.assertTrue(integration.autostart_status(launcher)['registered'])
             self.assertIn('--autostart', startup.read_text())
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import os
 import sys
 from ctypes import wintypes
 from typing import Optional
@@ -25,6 +26,61 @@ class WindowsPlatform(PlatformAdapter):
         user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
         user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
         kernel32.GetTickCount.restype = wintypes.DWORD
+        kernel32.ProcessIdToSessionId.argtypes = [wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+        kernel32.ProcessIdToSessionId.restype = wintypes.BOOL
+        self._wts = ctypes.WinDLL("wtsapi32", use_last_error=True)
+        self._wts.WTSQuerySessionInformationW.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.c_int,
+                                                        ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(wintypes.DWORD)]
+        self._wts.WTSQuerySessionInformationW.restype = wintypes.BOOL
+        self._wts.WTSFreeMemory.argtypes = [ctypes.c_void_p]
+        user32.OpenInputDesktop.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        user32.OpenInputDesktop.restype = wintypes.HANDLE
+        user32.CloseDesktop.argtypes = [wintypes.HANDLE]
+        user32.GetThreadDesktop.argtypes = [wintypes.DWORD]
+        user32.GetThreadDesktop.restype = wintypes.HANDLE
+        kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+        user32.GetUserObjectInformationW.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
+                                                    wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+        user32.GetUserObjectInformationW.restype = wintypes.BOOL
+
+    def _session_id(self, pid: int) -> int:
+        session = wintypes.DWORD()
+        if not self._kernel32.ProcessIdToSessionId(pid, ctypes.byref(session)):
+            raise OSError("Cannot determine Windows session")
+        return session.value
+
+    def _desktop_name(self, handle) -> str:
+        name = ctypes.create_unicode_buffer(256)
+        needed = wintypes.DWORD()
+        if not handle or not self._user32.GetUserObjectInformationW(
+                handle, 2, name, ctypes.sizeof(name), ctypes.byref(needed)):
+            raise OSError("Cannot determine input desktop")
+        return name.value
+
+    def is_session_active(self) -> bool:
+        session_id = self._session_id(os.getpid())
+        if session_id == 0:
+            return False
+        buffer, size = ctypes.c_void_p(), wintypes.DWORD()
+        try:
+            if not self._wts.WTSQuerySessionInformationW(None, session_id, 8, ctypes.byref(buffer), ctypes.byref(size)):
+                raise OSError("Cannot determine RDP connection state")
+            if not buffer.value or size.value < ctypes.sizeof(ctypes.c_int):
+                raise OSError("Invalid RDP connection state")
+            if ctypes.cast(buffer, ctypes.POINTER(ctypes.c_int)).contents.value != 0:
+                return False
+        finally:
+            if buffer.value:
+                self._wts.WTSFreeMemory(buffer)
+        # A locked/secure desktop must not inherit the last foreground application.
+        desktop = self._user32.OpenInputDesktop(0, False, 1)
+        if not desktop:
+            return False
+        try:
+            current = self._user32.GetThreadDesktop(self._kernel32.GetCurrentThreadId())
+            return self._desktop_name(desktop) == self._desktop_name(current)
+        finally:
+            self._user32.CloseDesktop(desktop)
 
     def platform_name(self) -> str:
         return "windows"
@@ -36,6 +92,8 @@ class WindowsPlatform(PlatformAdapter):
         pid = wintypes.DWORD()
         self._user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         process_id = pid.value
+        if self._session_id(process_id) != self._session_id(os.getpid()):
+            return None
         exe_path = None
         exe_name = None
         try:
@@ -62,7 +120,7 @@ class WindowsPlatform(PlatformAdapter):
         plii = LASTINPUTINFO()
         plii.cbSize = ctypes.sizeof(LASTINPUTINFO)
         if not self._user32.GetLastInputInfo(ctypes.byref(plii)):
-            return 0
+            raise OSError("Cannot determine last user input")
         tick_count = self._kernel32.GetTickCount()
         elapsed = (tick_count - plii.dwTime) & 0xffffffff
         return int(elapsed)

@@ -184,7 +184,11 @@ def install(bundle, root, company_code, integrate=True, language="", company_res
     # An already-running agent can be reopened without taking its supervisor lock.
     if (root / 'current.json').exists():
         check_existing_company(root, read_json(root / 'enrollment.json', {}), company_code, resolver)
-        return upgrade_existing(bundle,root,language,integrate,health_check)
+        launcher = upgrade_existing(bundle,root,language,integrate,health_check)
+        if integrate:
+            from .legacy_migration import replace_current_user
+            replace_current_user(root)
+        return launcher
     root.mkdir(parents=True,exist_ok=True,mode=0o700)
     with SingleInstance(root / "supervisor.lock"), SingleInstance(root / "install.lock"):
         existing=read_json(root / "enrollment.json",{})
@@ -193,6 +197,8 @@ def install(bundle, root, company_code, integrate=True, language="", company_res
             launcher = installed_launcher(root)
             if integrate:
                 autostart(launcher, True)
+                from .legacy_migration import replace_current_user
+                replace_current_user(root)
             return launcher
         build=read_json(bundle / "setup-build.json")
         target_os,arch=runtime_target()
@@ -222,6 +228,8 @@ def install(bundle, root, company_code, integrate=True, language="", company_res
             register_host(root / executable_name(True,True),root.parent)
             autostart(root / executable_name(False,True),True)
             shortcuts(root)
+            from .legacy_migration import replace_current_user
+            replace_current_user(root)
     return root / executable_name(False,True)
 
 
