@@ -54,6 +54,17 @@ class RestartInventoryTests(unittest.TestCase):
     def check(self):
         scope.assert_no_global_restart([Path('soft_agent_windows.exe')])
 
+    def service(self, start_type, status, binpath='soft_agent_windows.exe'):
+        service = Mock()
+        service.name.return_value = 'Agent'
+        service.binpath.return_value = binpath
+        service.start_type.return_value = start_type
+        service.status.return_value = status
+        service.description.side_effect = FileNotFoundError('QueryServiceConfig2W')
+        service.display_name.side_effect = AssertionError('Unneeded display name query')
+        service.as_dict.side_effect = AssertionError('Unneeded full service query')
+        return service
+
     def test_hklm_run_blocks(self):
         key = Mock()
         key.__enter__ = Mock(return_value=key)
@@ -65,27 +76,41 @@ class RestartInventoryTests(unittest.TestCase):
                 self.check()
 
     def test_running_disabled_service_still_blocks(self):
-        service = Mock()
-        service.as_dict.return_value = {'start_type': 'disabled', 'status': 'running',
-                                       'name': 'Agent', 'binpath': 'soft_agent_windows.exe'}
+        service = self.service('disabled', 'running')
         with patch.object(scope.psutil, 'win_service_iter', return_value=[service]):
             with self.assertRaisesRegex(ValueError, 'Cannot exclude'):
                 self.check()
 
     def test_stopped_demand_service_still_blocks(self):
-        service = Mock()
-        service.as_dict.return_value = {'start_type': 'manual', 'status': 'stopped',
-                                       'name': 'Agent', 'binpath': 'soft_agent_windows.exe'}
+        service = self.service('manual', 'stopped')
         with patch.object(scope.psutil, 'win_service_iter', return_value=[service]):
             with self.assertRaisesRegex(ValueError, 'Cannot exclude'):
                 self.check()
 
     def test_disabled_stopped_service_is_inert(self):
-        service = Mock()
-        service.as_dict.return_value = {'start_type': 'disabled', 'status': 'stopped',
-                                       'name': 'Agent', 'binpath': 'soft_agent_windows.exe'}
+        service = self.service('disabled', 'stopped')
         with patch.object(scope.psutil, 'win_service_iter', return_value=[service]):
             self.check()
+
+    def test_unavailable_description_does_not_block_required_service_metadata(self):
+        service = self.service('automatic', 'running', 'unrelated.exe')
+        with self.assertRaises(FileNotFoundError):
+            service.description()
+        service.description.reset_mock()
+        with patch.object(scope.psutil, 'win_service_iter', return_value=[service]):
+            self.assertEqual(list(scope.global_restart_commands()), ['Agent unrelated.exe'])
+        for name in ('name', 'binpath', 'start_type', 'status'):
+            getattr(service, name).assert_called_once_with()
+        service.description.assert_not_called()
+        service.display_name.assert_not_called()
+        service.as_dict.assert_not_called()
+
+    def test_required_service_metadata_failure_still_blocks(self):
+        service = self.service('automatic', 'running', 'unrelated.exe')
+        service.binpath.side_effect = PermissionError('denied')
+        with patch.object(scope.psutil, 'win_service_iter', return_value=[service]):
+            with self.assertRaisesRegex(ValueError, 'Cannot exclude'):
+                self.check()
 
     def test_scheduled_restart_blocks(self):
         action = Mock(Type=0, Path='powershell.exe', Arguments='start soft_agent_windows.exe')

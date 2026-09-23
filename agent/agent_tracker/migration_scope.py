@@ -63,10 +63,13 @@ def global_restart_commands():
 
     for service in psutil.win_service_iter():
         bounded()
-        info = service.as_dict()
+        # as_dict also queries optional description/display metadata, which may
+        # fail for otherwise inspectable services (QueryServiceConfig2W).
+        name, binpath = service.name(), service.binpath()
+        start_type, status = service.start_type(), service.status()
         # Stopped demand-start services can be launched by another service/task.
-        if info.get('start_type') != 'disabled' or info.get('status') != 'stopped':
-            yield str(info.get('name', '')) + ' ' + str(info['binpath'])
+        if start_type != 'disabled' or status != 'stopped':
+            yield name + ' ' + binpath
 
     startup = Path(shell.SHGetFolderPath(0, shellcon.CSIDL_COMMON_STARTUP, 0, 0))
     for path in startup.iterdir():
