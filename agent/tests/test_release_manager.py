@@ -204,7 +204,7 @@ class ReleaseTests(unittest.TestCase):
         manager.activate(manager.stage(archive, manifest))
         manager.confirm()
         if os.name == 'nt':
-            self.update_registration.assert_called_once_with(self.root)
+            self.update_registration.assert_called_once_with(self.root.resolve())
 
     def test_legacy_opt_out_in_install_race_branch(self):
         bundle, root = self.installer_fixture()

@@ -31,6 +31,7 @@ class MigrationTests(unittest.TestCase):
         self.process = Mock()
         self.process.name.return_value = self.exe.name
         self.process.exe.return_value = str(self.exe)
+        self.process.cmdline.return_value = [str(self.exe)]
         self.process.username.return_value = 'DOMAIN\\Employee'
         self.process.pid = 100
         for patcher in (patch.dict(sys.modules, winreg=self.registry),
@@ -95,6 +96,59 @@ class MigrationTests(unittest.TestCase):
         buffer = ctypes.create_unicode_buffer(32768)
         self.assertGreater(function(str(self.profile), buffer, len(buffer)), 0)
         self.assertTrue(migration.removable(Path(buffer.value) / self.exe.name, self.profile))
+
+    def strict_context(self):
+        from contextlib import ExitStack
+        from agent_tracker import migration_scope
+        stack = ExitStack()
+        ts = Mock()
+        ts.ProcessIdToSessionId.return_value = 4
+        stack.enter_context(patch.dict(sys.modules, win32ts=ts))
+        stack.enter_context(patch.object(migration_scope, 'assert_no_global_restart'))
+        return stack, ts
+
+    def test_two_users_same_shared_exe_only_caller_stops_and_file_unchanged(self):
+        other = Mock(pid=200)
+        other.name.return_value = self.exe.name
+        other.username.return_value = 'DOMAIN\\SomeoneElse'
+        before = self.exe.read_bytes()
+        stack, _ = self.strict_context()
+        with stack, patch.object(migration.psutil, 'process_iter', return_value=[self.process, other]), \
+                patch.object(migration, 'removable', side_effect=AssertionError('Strict mode cannot rename')):
+            result = migration.replace_current_user(self.root, session_id=4, expected_files=[str(self.exe)])
+        self.process.kill.assert_called_once()
+        other.kill.assert_not_called()
+        self.assertEqual(self.exe.read_bytes(), before)
+        self.assertEqual(result['disabled'], [])
+        self.assertEqual(result['retained'], [str(self.exe)])
+
+    def test_same_user_other_session_is_untouched(self):
+        other = Mock(pid=200)
+        other.name.return_value = self.exe.name
+        other.username.return_value = self.process.username.return_value
+        stack, ts = self.strict_context()
+        ts.ProcessIdToSessionId.side_effect = lambda pid: 5 if pid == 200 else 4
+        with stack, patch.object(migration.psutil, 'process_iter', return_value=[self.process, other]):
+            migration.replace_current_user(self.root, session_id=4, expected_files=[self.exe])
+        self.process.kill.assert_called_once()
+        other.kill.assert_not_called()
+        other.exe.assert_not_called()
+        self.assertTrue(self.exe.is_file())
+
+    def test_session_changed_before_kill_blocks(self):
+        stack, ts = self.strict_context()
+        ts.ProcessIdToSessionId.side_effect = [4, 4, 5]
+        with stack, self.assertRaisesRegex(ValueError, 'session_changed'):
+            migration.replace_current_user(self.root, session_id=4)
+        self.process.kill.assert_not_called()
+        self.assertTrue(self.exe.is_file())
+
+    def test_unexpected_file_blocks_before_startup_change(self):
+        stack, _ = self.strict_context()
+        with stack, self.assertRaisesRegex(ValueError, 'migration_changed'):
+            migration.replace_current_user(self.root, session_id=4, expected_files=[])
+        self.registry.DeleteValue.assert_not_called()
+        self.process.kill.assert_not_called()
 
 
 if __name__ == '__main__':

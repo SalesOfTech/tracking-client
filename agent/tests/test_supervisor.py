@@ -30,7 +30,7 @@ class SupervisorTests(unittest.TestCase):
             # Contents are immaterial: even an incomplete intent marker must block startup.
             (root / 'uninstall-requested.json').touch()
             def current_payload(arguments):
-                self.assertIn(str(root / 'versions' / '3.2.1'), arguments[0])
+                self.assertIn((root / 'versions' / '3.2.1').resolve(), Path(arguments[0]).resolve().parents)
                 self.assertEqual(arguments[1:3], ['--supervisor', '--installed-root'])
                 return supervisor.main(arguments[3])
             call = Mock(side_effect=current_payload)

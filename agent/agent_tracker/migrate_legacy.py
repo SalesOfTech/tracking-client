@@ -21,6 +21,7 @@ from .core.files import atomic_json, read_json
 from .core.instance import SingleInstance
 from .core.networking import HttpClient
 from .integration import autostart, protect_workspace
+from .migration_scope import assert_no_global_restart, program_files_roots
 
 
 class MigrationError(ValueError):
@@ -78,6 +79,21 @@ def capability(executable, bundle):
     return match[2]
 
 
+def readable_legacy_path(path, profile):
+    """Only discovery may read outside the profile; never grant mutation rights."""
+    path = Path(path).absolute()
+    if path.resolve().is_relative_to(profile.resolve()):
+        safe_path(path, profile)
+        return
+    for shared_root in program_files_roots():
+        if shared_root.drive.startswith('\\'):
+            continue
+        if path.resolve().is_relative_to(shared_root.resolve()):
+            safe_path(path, shared_root)
+            return
+    raise MigrationError('Legacy path is outside the profile and local Program Files')
+
+
 def discover_legacy(profile, snapshot, root):
     import win32api
     import win32con
@@ -87,8 +103,9 @@ def discover_legacy(profile, snapshot, root):
         raise MigrationError('Missing or ambiguous Legacy installation')
     config_path = paths.pop()
     install_path = root.parent / 'Agent' / 'install_id.txt'
+    readable_legacy_path(config_path, profile)
+    safe_path(install_path, profile)
     for path in (config_path, install_path):
-        safe_path(path, profile)
         if not path.is_file() or path.stat().st_size > 65536:
             raise MigrationError('Missing or invalid Legacy configuration')
     config = read_json(config_path, {})
@@ -142,7 +159,7 @@ def snapshot_legacy(profile, owner, session):
             if process.username().casefold() != owner:
                 continue
             if win32ts.ProcessIdToSessionId(process.pid) != session:
-                raise ValueError('Legacy is running in another session of this account')
+                continue
             if len(process.cmdline()) != 1:
                 raise MigrationError('Custom Legacy launch arguments require administrator review')
             path = Path(process.exe())
@@ -151,21 +168,20 @@ def snapshot_legacy(profile, owner, session):
         except psutil.NoSuchProcess:
             continue
     for path in files:
-        safe_path(path, profile)
-        if not legacy_migration.removable(path, profile) or path.with_name(path.name + '.legacy-disabled').exists():
-            raise ValueError('Legacy file is shared, missing or already disabled; manual review required')
+        readable_legacy_path(path, profile)
+        if not path.is_file() or not legacy_migration.LEGACY_NAME.fullmatch(path.name):
+            raise ValueError('Legacy file is missing or unrecognized; manual review required')
+    assert_no_global_restart(files)
     return {'startup': startup, 'files': sorted(map(str, files)), 'running': sorted(map(str, running))}
 
 
-def restore_legacy(snapshot):
+def restore_legacy(snapshot, *, session_id):
     import winreg
-    for value in snapshot['files']:
-        path = Path(value)
-        disabled = path.with_name(path.name + '.legacy-disabled')
-        if disabled.exists():
-            if path.exists():
-                raise ValueError('Rollback destination changed; manual recovery required')
-            disabled.rename(path)
+    import win32ts
+    if win32ts.ProcessIdToSessionId(os.getpid()) != session_id:
+        raise ValueError('Migration session changed; manual recovery required')
+    # Strict-session retirement never renames any file. Rollback must not infer
+    # ownership of a sibling .legacy-disabled file, especially in Program Files.
     if snapshot['startup']:
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, legacy_migration.RUN_KEY) as key:
             try:
@@ -180,7 +196,8 @@ def restore_legacy(snapshot):
     owner = psutil.Process().username().casefold()
     for process in psutil.process_iter():
         try:
-            if process.username().casefold() == owner:
+            if (process.username().casefold() == owner
+                    and win32ts.ProcessIdToSessionId(process.pid) == session_id):
                 active.add(process.exe())
         except psutil.NoSuchProcess:
             pass
@@ -296,7 +313,7 @@ def migrate(bundle):
             autostart(launcher, True)
             phase = 'switching'
             save(phase)
-            legacy_migration.replace_current_user(install_root)
+            legacy_migration.replace_current_user(install_root, session_id=session, expected_files=initial['files'])
             subprocess.Popen([str(launcher)])
             phase = 'complete'
         except Exception:
@@ -307,7 +324,7 @@ def migrate(bundle):
                     phase = 'recovery_required'
             if phase in ('switching', 'recovery_required'):
                 try:
-                    restore_legacy(initial)
+                    restore_legacy(initial, session_id=session)
                     phase = 'rolled_back' if phase == 'switching' else phase
                 except Exception:
                     phase = 'recovery_required'

@@ -137,7 +137,7 @@ class OrchestrationTests(unittest.TestCase):
         self.mocks['replace_current_user'].side_effect = OSError('locked file')
         with self.assertRaises(OSError):
             self.run_migration()
-        self.mocks['restore_legacy'].assert_called_once_with(self.snapshot)
+        self.mocks['restore_legacy'].assert_called_once_with(self.snapshot, session_id=4)
         self.assertEqual(self.journal()['state'], 'rolled_back')
         self.mocks['Popen'].assert_not_called()
 
@@ -227,6 +227,8 @@ class ScopeTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         for patcher in (patch.object(winreg, 'OpenKey', side_effect=FileNotFoundError),
                         patch.object(win32ts, 'ProcessIdToSessionId', return_value=4),
+                        patch.object(migration, 'assert_no_global_restart'),
+                        patch.object(migration, 'program_files_roots', return_value=set()),
                         patch.object(migration.psutil, 'process_iter', return_value=[self.process])):
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -237,12 +239,12 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(result['files'], [])
         self.process.exe.assert_not_called()
 
-    def test_other_session_same_user_blocks(self):
-        with self.assertRaisesRegex(ValueError, 'another session'):
-            migration.snapshot_legacy(self.profile, 'domain\\employee', 5)
+    def test_other_session_same_user_is_ignored(self):
+        self.assertEqual(migration.snapshot_legacy(self.profile, 'domain\\employee', 5)['running'], [])
+        self.process.exe.assert_not_called()
 
     def test_shared_binary_blocks(self):
-        with self.assertRaisesRegex(ValueError, 'outside current'):
+        with self.assertRaisesRegex(ValueError, 'outside the profile'):
             migration.snapshot_legacy(self.profile / 'another-profile', 'domain\\employee', 4)
 
     def test_unknown_process_owner_blocks(self):
@@ -255,10 +257,20 @@ class ScopeTests(unittest.TestCase):
         with self.assertRaisesRegex(migration.MigrationError, 'Custom Legacy'):
             migration.snapshot_legacy(self.profile, 'domain\\employee', 4)
 
-    def test_rollback_collision_blocks(self):
+    def test_existing_disabled_sibling_is_not_adopted(self):
         self.exe.with_name(self.exe.name + '.legacy-disabled').write_bytes(b'previous')
-        with self.assertRaisesRegex(ValueError, 'already disabled'):
-            migration.snapshot_legacy(self.profile, 'domain\\employee', 4)
+        self.assertEqual(migration.snapshot_legacy(self.profile, 'domain\\employee', 4)['files'], [str(self.exe)])
+
+    def test_shared_program_files_discovery_is_read_only(self):
+        with patch.object(migration, 'program_files_roots', return_value={self.profile}):
+            result = migration.snapshot_legacy(self.profile / 'user', 'domain\\employee', 4)
+        self.assertEqual(result['files'], [str(self.exe)])
+        self.assertEqual(self.exe.read_bytes(), b'test')
+
+    def test_global_restart_blocks_discovery(self):
+        with patch.object(migration, 'assert_no_global_restart', side_effect=ValueError('global restart')):
+            with self.assertRaisesRegex(ValueError, 'global restart'):
+                migration.snapshot_legacy(self.profile, 'domain\\employee', 4)
 
 
 class CapabilityTests(unittest.TestCase):

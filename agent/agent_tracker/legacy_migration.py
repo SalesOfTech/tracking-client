@@ -39,10 +39,16 @@ def removable(path, profile):
     return bool(LEGACY_NAME.fullmatch(path.name)) and path.is_file()
 
 
-def replace_current_user(root):
+def replace_current_user(root, *, session_id=None, expected_files=None):
     if os.name != 'nt':
         return {'state': 'not_applicable'}
     import winreg
+
+    if session_id is not None:
+        import win32ts
+        if type(session_id) is not int or session_id <= 0 or win32ts.ProcessIdToSessionId(os.getpid()) != session_id:
+            raise ValueError('legacy_migration_session_changed')
+    allowed = {Path(path) for path in expected_files} if expected_files is not None else None
 
     # Use the process owner, not USERNAME, which can be stale after elevation.
     owner = psutil.Process().username().casefold()
@@ -68,6 +74,8 @@ def replace_current_user(root):
         try:
             if process.username().casefold() != owner:
                 continue
+            if session_id is not None and win32ts.ProcessIdToSessionId(process.pid) != session_id:
+                continue
             executable = Path(process.exe())
             if not LEGACY_NAME.fullmatch(executable.name):
                 continue
@@ -80,6 +88,11 @@ def replace_current_user(root):
             raise ValueError('legacy_migration_denied') from error
     if not candidates:
         return read_json(Path(root) / 'legacy-migration.json', {'state': 'not_found'})
+    if allowed is not None and not candidates.issubset(allowed):
+        raise ValueError('legacy_migration_changed')
+    if session_id is not None:
+        from .migration_scope import assert_no_global_restart
+        assert_no_global_restart(candidates)
     report = {'state': 'prepared', 'startup': command, 'owner': owner,
               'files': [str(path) for path in sorted(candidates)], 'stopped': [], 'retained': [], 'disabled': []}
     atomic_json(Path(root) / 'legacy-migration.json', report)
@@ -94,13 +107,19 @@ def replace_current_user(root):
                 # psutil retains creation time and refuses to kill a recycled PID.
                 if process.username().casefold() != owner or Path(process.exe()) not in candidates:
                     raise ValueError('legacy_migration_changed')
+                if session_id is not None and win32ts.ProcessIdToSessionId(process.pid) != session_id:
+                    raise ValueError('legacy_migration_session_changed')
+                if session_id is not None and len(process.cmdline()) != 1:
+                    raise ValueError('legacy_migration_changed')
                 process.kill()
                 process.wait(timeout=10)
                 report['stopped'].append(process.pid)
             except psutil.NoSuchProcess:
                 pass
         for path in candidates:
-            if removable(path, Path.home()):
+            # Session-scoped migration never mutates binaries: another session of
+            # the same Windows account can legitimately be using the same file.
+            if session_id is None and removable(path, Path.home()):
                 disabled = path.with_name(path.name + '.legacy-disabled')
                 if disabled.exists():
                     # Do not overwrite a previous rollback copy.

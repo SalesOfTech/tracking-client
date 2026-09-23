@@ -34,7 +34,8 @@ def run(bundle):
                                       user_id=7, company_name='Fixture', user_name='Fixture'),
                         config={'policy_expires_at': int(time.time()) + 300, 'tracking': False})
 
-        def retire(install):
+        def retire(install, **scope):
+            assert scope['session_id'] == 1
             client = Client(root)
             try:
                 assert client.state.get('identity')['user_id'] == 7

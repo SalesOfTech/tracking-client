@@ -27,7 +27,11 @@ transaction. The client never mints or rotates an employee key and does not infe
 authorization from an old username.
 
 Discovery reads only the current account's HKCU `Run/SOFTAgent` and owned Legacy
-processes, then `agent_config.json` next to the one unambiguous Legacy installation.
+processes in the current session, then `agent_config.json` next to the one
+unambiguous Legacy installation. EXE/config may be in the current profile or local
+Windows Program Files roots obtained from OS/registry APIs, not environment overrides.
+Program Files discovery is read-only. Other users' profiles, UNC/shared network
+locations and reparse points are not accepted.
 It reads `install_id.txt` from token-resolved LOCALAPPDATA/SOFT/Agent. Company ID
 comes from that config; Windows username comes from the current process token SID,
 and machine name from the Windows API. Inherited USERNAME is not used. The local
@@ -45,9 +49,10 @@ protected v3 state database for every retry. There is no pending-approval UI.
 ## Ordered transition
 
 1. Validate filename target, current non-elevated user/session, local Legacy files
-   and profile boundaries. Refuse shared paths, reparse points, custom Legacy
-   command arguments, unknown process ownership, other sessions of the same user,
-   conflicting profiles and ambiguous installations. Other users are untouched.
+   and discovery boundaries. Refuse unsupported shared paths, reparse points,
+   custom Legacy command arguments, unknown process ownership, conflicting profiles
+   and ambiguous installations. Ignore other users and other sessions of the same
+   user, even if their processes use exactly the same executable.
 2. Reserve a fresh v3 workspace, or validate this tool's own migration journal
    against owner, session, root, local metadata and unchanged Legacy snapshot.
 3. Redeem the personalized grant with the durable device identity. Any failure
@@ -61,8 +66,41 @@ protected v3 state database for every retry. There is no pending-approval UI.
    changes. Run `installer.installed_health` before retiring Legacy.
 6. Recheck user/session, Legacy snapshot and local metadata. Register native host,
    shortcuts, the Apps uninstall entry and v3 autostart. Only then call
-   `legacy_migration.replace_current_user`.
-7. Launch v3 and retain Legacy disabled binaries/configuration for recovery.
+   `legacy_migration.replace_current_user` with the verified session ID and allowed
+   executable paths. It rechecks session/owner/path before stopping each process.
+7. Launch v3 and retain all Legacy binaries/configuration in place for recovery.
+
+## Shared Program Files and RDP
+
+The migrator's strict-session retirement never renames or deletes any Legacy
+binary, including profile-local files that another session could be using. It
+removes only this account's HKCU SOFTAgent startup entry and stops only matching
+processes in the invoking session. HKCU is account-wide, not session-specific;
+already-running processes in other sessions are preserved. The older installer
+call without a session argument retains its existing behavior.
+
+Before preparation and again before retirement, read-only checks inspect both HKLM
+registry views (Run/RunOnce/Explorer policy Run), services, common Startup entries
+and enabled/running scheduled task executable actions. A matching global launcher,
+opaque common Startup script, nested RunOnceEx commands, permission failure or
+incomplete/bounded inventory blocks automatic migration for administrator review.
+No HKLM value, service, scheduled task, common Startup entry or shared file is
+modified. Stopped demand-start services still block; only disabled and stopped
+services are inert. The migrator does not request elevation to bypass a blocker.
+
+This is not a guaranteed one-click migration on every RDP farm. In particular an
+unrelated script in Common Startup or an unrelated populated RunOnceEx can block
+the entire preflight: the tool does not interpret those commands to prove them
+harmless. Ask the Windows administrator to inspect those registrations and the
+farm's software-management policy, then arrange a reviewed migration path. Do not
+delete unrelated startup entries, elevate the migrator, or bypass the checks just
+to make it continue. Before preflight completes, no migration journal may exist;
+the original Legacy startup/processes have not been changed by this tool.
+
+These checks cover discoverable registrations, not arbitrary behavior inside an
+unrelated executable/COM task handler or external management system. Farms where
+such systems manage Legacy restart need administrator review before a pilot; do
+not treat a clean inventory as proof about undisclosed management scripts.
 
 ## Failure and resume
 
@@ -74,8 +112,11 @@ identity. Partial install directories without current.json are moved aside as
 `incomplete-install-*`; device state and outboxes remain intact. No directory is
 recursively deleted. A newly issued download may resume the same bound migration.
 
-Retirement/launch exceptions disable v3 autostart and attempt to restore original
-Legacy filenames, unchanged HKCU startup and previously running executables.
+Retirement/launch exceptions disable v3 autostart and attempt to restore unchanged
+HKCU startup and previously running executables in the invoking session. Rollback
+never renames/restores shared or profile-local files, and never adopts a preexisting
+`.legacy-disabled` sibling. Another session's running process does not suppress
+restarting this session's original executable.
 `recovery_required` means automatic recovery could not be verified. `switching`
 left by process termination/power loss is deliberately not auto-resumed. Contact
 the administrator; never delete the journal, identity, outboxes or rollback files.
