@@ -28,12 +28,11 @@ def removable(path, profile):
     """Never rename shared binaries, junction targets or anything outside this profile."""
     path, profile = Path(path).absolute(), Path(profile).resolve()
     try:
-        path.relative_to(profile)
         path.resolve().relative_to(profile)
     except ValueError:
         return False
     for part in (path, *path.parents):
-        if part == profile:
+        if part.exists() and part.samefile(profile):
             break
         if part.exists() and getattr(part.lstat(), 'st_file_attributes', 0) & 0x400:
             return False

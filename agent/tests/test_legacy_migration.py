@@ -86,6 +86,16 @@ class MigrationTests(unittest.TestCase):
     def test_external_path_is_not_removable(self):
         self.assertFalse(migration.removable(self.exe, self.profile / 'another-user'))
 
+    def test_windows_short_profile_alias_is_same_user(self):
+        import ctypes
+        from ctypes import wintypes
+        function = ctypes.WinDLL('kernel32').GetShortPathNameW
+        function.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+        function.restype = wintypes.DWORD
+        buffer = ctypes.create_unicode_buffer(32768)
+        self.assertGreater(function(str(self.profile), buffer, len(buffer)), 0)
+        self.assertTrue(migration.removable(Path(buffer.value) / self.exe.name, self.profile))
+
 
 if __name__ == '__main__':
     unittest.main()

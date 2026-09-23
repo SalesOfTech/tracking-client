@@ -163,7 +163,7 @@ class ReleaseTests(unittest.TestCase):
                 patch('agent_tracker.installer.shortcuts'), patch.object(integration, '_system', return_value='linux'), \
                 patch.object(integration, '_startup_path', return_value=startup):
             launcher = install(bundle, root, 'a'*32)
-            self.migration.assert_called_once_with(root)
+            self.migration.assert_called_once_with(root.resolve())
             self.assertTrue(integration.autostart_status(launcher)['registered'])
             self.assertIn('--autostart', startup.read_text())
 

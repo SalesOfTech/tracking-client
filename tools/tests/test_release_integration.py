@@ -406,10 +406,12 @@ class ReleaseIntegrationTests(unittest.TestCase):
         self.assertEqual(release.file_digest(path),hashlib.sha256(path.read_bytes()).hexdigest())
 
     def test_required_upgrade_baselines_cannot_be_overridden(self):
-        for version in ('3.2.0','3.2.0-rc.1','3.2.1'):
+        for version in ('3.2.0','3.2.0-rc.1'):
             self.assertEqual(ci.upgrade_baselines(version), ['3.1.0','3.0.4'])
             self.assertEqual(ci.upgrade_baselines(version,'3.0.0-beta.7'), ['3.1.0','3.0.4','3.0.0-beta.7'])
         self.assertEqual(ci.upgrade_baselines('3.2.0','3.1.0,3.0.4'), ['3.1.0','3.0.4'])
+        self.assertEqual(ci.upgrade_baselines('3.2.1'), ['3.2.0','3.1.0','3.0.4'])
+        self.assertEqual(ci.upgrade_baselines('3.2.1','3.2.0'), ['3.2.0','3.1.0','3.0.4'])
         self.assertEqual(len(ci.upgrade_baselines('3.2.0','3.0.0,3.0.1,3.0.2')),5)
 
     def test_old_release_baselines_are_preserved(self):
