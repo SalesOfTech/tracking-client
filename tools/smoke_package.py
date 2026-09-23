@@ -28,7 +28,7 @@ def main(bundle):
         migration = json.loads(migration_descriptor.read_text(encoding='utf-8'))
         if migration.get('file') != 'SOFT-Tracking-Migrate.exe':
             raise RuntimeError('Unexpected migration smoke binary')
-        result = run_frozen([str(bundle.parent / migration['file']), '--self-test'], timeout=180)
+        result = run_frozen([str(bundle.parent / migration['file']), '--self-test'], env=dict(os.environ), timeout=180)
         if result.returncode or b'PASS: isolated frozen migration smoke' not in result.stdout:
             raise RuntimeError('Frozen migration smoke failed (no real user migration was requested)')
     for base in (Path(bundle) / 'guide',):
