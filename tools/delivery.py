@@ -75,6 +75,7 @@ def main():
         current = {'isDraft': True, 'assets': []}
     existing = {a['name']: a for a in current['assets']}
     expected = set()
+    catalog = {'version': version, 'targets': {}}
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         for asset in archives:
@@ -82,6 +83,10 @@ def main():
             archive = root / asset['name']
             if archive.stat().st_size != asset['size'] or 'sha256:' + digest(archive) != asset['digest']:
                 raise ValueError('Source archive mismatch')
+            target = archive.name.removeprefix('SOFT-Tracking-').removesuffix('-' + version + '.zip')
+            with zipfile.ZipFile(archive) as bundle:
+                catalog['targets'][target] = {name: json.loads(bundle.read(target + '/' + name))
+                                               for name in ('setup.json', 'manifest.json')}
             for path in export(archive, root, version):
                 expected.add(path.name)
                 old = existing.get(path.name)
@@ -94,6 +99,16 @@ def main():
                     gh('release', 'upload', tag, str(path), '--repo', repo)
                 path.unlink()
             archive.unlink()
+        metadata = root / 'catalog.json'
+        metadata.write_text(json.dumps(catalog, sort_keys=True, separators=(',', ':')), encoding='utf-8')
+        expected.add(metadata.name)
+        if metadata.name in existing:
+            if existing[metadata.name]['digest'] != 'sha256:' + digest(metadata):
+                raise ValueError('Refusing to replace an existing catalog')
+        elif current['isDraft']:
+            gh('release', 'upload', tag, str(metadata), '--repo', repo)
+        else:
+            raise ValueError('Published delivery has no catalog')
     final = json.loads(gh('release', 'view', tag, '--repo', repo, '--json', 'assets'))
     if {a['name'] for a in final['assets']} != expected:
         raise ValueError('Unexpected delivery assets')
