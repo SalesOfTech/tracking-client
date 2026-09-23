@@ -33,6 +33,12 @@ class Response:
 
 class ReleaseTests(unittest.TestCase):
     def setUp(self):
+        registration = patch('agent_tracker.installer.register_uninstaller')
+        self.registration = registration.start()
+        self.addCleanup(registration.stop)
+        update_registration = patch('agent_tracker.uninstaller.register_uninstaller')
+        self.update_registration = update_registration.start()
+        self.addCleanup(update_registration.stop)
         migration = patch('agent_tracker.legacy_migration.replace_current_user')
         self.migration = migration.start()
         self.addCleanup(migration.stop)
@@ -164,6 +170,7 @@ class ReleaseTests(unittest.TestCase):
                 patch.object(integration, '_startup_path', return_value=startup):
             launcher = install(bundle, root, 'a'*32)
             self.migration.assert_called_once_with(root.resolve())
+            self.registration.assert_called_once_with(root.resolve())
             self.assertTrue(integration.autostart_status(launcher)['registered'])
             self.assertIn('--autostart', startup.read_text())
 
@@ -179,6 +186,49 @@ class ReleaseTests(unittest.TestCase):
             self.assertTrue(integration.autostart_status(launcher)['registered'])
             stop.assert_not_called()
         self.assertEqual(before, ((root/'enrollment.json').read_bytes(), (root/'current.json').read_bytes()))
+        self.registration.assert_called_once_with(root.resolve())
+
+    def test_optional_legacy_retirement_preserves_new_and_existing_integrations(self):
+        bundle, root = self.installer_fixture()
+        fresh = Path(self.tmp.name) / 'fresh-opt-out'
+        with patch('agent_tracker.installer.protect_workspace'), patch('agent_tracker.installer.register_host'), \
+                patch('agent_tracker.installer.shortcuts'), patch('agent_tracker.installer.autostart'):
+            install(bundle, fresh, 'a'*32, retire_legacy=False)
+            install(bundle, root, 'a'*32, retire_legacy=False)
+        self.migration.assert_not_called()
+        self.assertEqual(self.registration.call_count, 2)
+
+    def test_confirmed_update_repairs_uninstall_registration(self):
+        archive, manifest, _ = self.package()
+        manager = ReleaseManager(self.root)
+        manager.activate(manager.stage(archive, manifest))
+        manager.confirm()
+        if os.name == 'nt':
+            self.update_registration.assert_called_once_with(self.root)
+
+    def test_legacy_opt_out_in_install_race_branch(self):
+        bundle, root = self.installer_fixture()
+        original = Path.exists
+        calls = []
+        def exists(path):
+            if path == root / 'current.json':
+                calls.append(path)
+                if len(calls) == 1:
+                    return False
+            return original(path)
+        with patch.object(Path, 'exists', exists), patch('agent_tracker.installer.autostart'):
+            install(bundle, root, 'a'*32, retire_legacy=False)
+        self.migration.assert_not_called()
+        self.registration.assert_called_once_with(root.resolve())
+
+    def test_uninstall_registration_failure_does_not_rollback_confirmed_update(self):
+        archive, manifest, _ = self.package()
+        manager = ReleaseManager(self.root)
+        manager.activate(manager.stage(archive, manifest))
+        self.update_registration.side_effect = OSError('locked launcher')
+        manager.confirm()
+        self.assertEqual(manager.active()['version'], '3.0.1')
+        self.assertFalse((self.root / 'pending.json').exists())
 
     def test_existing_upgrade_registers_startup_but_nonintegrated_setup_does_not(self):
         bundle, root = self.installer_fixture()

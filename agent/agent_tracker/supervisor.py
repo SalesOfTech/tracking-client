@@ -11,6 +11,11 @@ from .core.client import ClientState, workspace
 
 def main(root, autostart=False):
     root = Path(root).resolve()
+    uninstall_marker = root / 'uninstall-requested.json'
+    # Retained 3.2.0 launchers do not know this marker. Exit without retry (75)
+    # or creating client state when they enter the current supervisor payload.
+    if uninstall_marker.exists():
+        return 0
     manager = ReleaseManager(root)
     credentials = ClientState(root.parent)
     try:
@@ -27,10 +32,15 @@ def main(root, autostart=False):
     executable = release_path(root, manager.active()["version"]) / "app" / executable_name()
     env = dict(os.environ, SOFT_TRACKING_INSTALL=str(root), SOFT_TRACKING_HEALTH=str(health), SOFT_TRACKING_RUN_TOKEN=token)
     args = [str(executable)] + (["--autostart"] if autostart else [])
+    if uninstall_marker.exists():
+        return 0
     child = subprocess.Popen(args, env=env)
     next_check = time.monotonic()
     while child.poll() is None:
         time.sleep(1)
+        if uninstall_marker.exists():
+            # The uninstaller requests a graceful child stop and waits for our lock.
+            continue
         if time.monotonic() < next_check:
             continue
         next_check = time.monotonic() + 3600
@@ -62,6 +72,9 @@ def main(root, autostart=False):
             new_health = run / (uuid.uuid4().hex + ".ready")
             env["SOFT_TRACKING_HEALTH"] = str(new_health)
             newer = release_path(root, manifest["version"]) / "app" / executable_name()
+            if uninstall_marker.exists():
+                manager.rollback()
+                return 0
             candidate = subprocess.Popen([str(newer), "--health-check"], env=env)
             deadline = time.monotonic() + 45
             while candidate.poll() is None and time.monotonic() < deadline:

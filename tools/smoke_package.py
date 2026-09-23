@@ -22,6 +22,15 @@ from smoke_helpers import (run_frozen, stop_tree, assert_ui_payload, assert_ui_h
 def main(bundle):
     bundle = Path(bundle)
     metadata = json.loads((bundle/'setup-build.json').read_text(encoding='utf-8'))
+    # Older baseline packages legitimately predate the standalone migration tool.
+    migration_descriptor = bundle.parent / 'migration.json'
+    if metadata['os'] == 'windows' and migration_descriptor.is_file():
+        migration = json.loads(migration_descriptor.read_text(encoding='utf-8'))
+        if migration.get('file') != 'SOFT-Tracking-Migrate.exe':
+            raise RuntimeError('Unexpected migration smoke binary')
+        result = run_frozen([str(bundle.parent / migration['file']), '--self-test'], timeout=180)
+        if result.returncode or b'PASS: isolated frozen migration smoke' not in result.stdout:
+            raise RuntimeError('Frozen migration smoke failed (no real user migration was requested)')
     for base in (Path(bundle) / 'guide',):
         for name in ('setup.html', 'setup.js', 'setup.css', 'locale.js', 'icons/icon48.png'):
             assert (base / name).is_file(), 'Missing offline setup guide: ' + name

@@ -76,6 +76,11 @@ def client_language(saved="", enrollment=None):
 
 TEXT = {
     "en": {
+        "uninstall_title": "Uninstall SOFT Tracking",
+        "uninstall_flush_warning": "Before removal we will try to send queued activity for up to 5 seconds. Offline, failed or remaining unsent data will be lost. Continue?",
+        "uninstall_confirm": "Uninstall SOFT Tracking for this Windows account?\n\nThis stops tracking and deletes local settings and unsent activity. Server history and other Windows accounts are not removed. Browser extensions must be removed separately.",
+        "uninstall_failed": "Uninstall could not be started. Close SOFT Tracking and retry. No administrator access is required.",
+        "uninstall_incomplete": "SOFT Tracking removal could not finish. Some local files or registrations may remain. Close the app and retry from Installed Apps.",
         "overview": "Overview", "connection": "Connection", "browsers": "Browsers", "diagnostics": "Diagnostics",
         "language": "Language", "company_code": "Company installation code", "employee_key": "Employee key",
         "connect": "Connect this PC", "unregistered": "This PC is not registered", "connected": "Connected",
@@ -103,6 +108,11 @@ TEXT = {
         "update_error": "Update needs attention", "update_idle": "Waiting", "update_unknown": "Update status available in technical details",
     },
     "ru": {
+        "uninstall_title": "Удаление SOFT Tracking",
+        "uninstall_flush_warning": "Перед удалением будет выполнена попытка отправить накопленную активность с ожиданием до 5 секунд. Без сети, при ошибке или нехватке времени неотправленные данные будут потеряны. Продолжить?",
+        "uninstall_confirm": "Удалить SOFT Tracking для этой учётной записи Windows?\n\nОтслеживание будет остановлено, локальные настройки и неотправленная активность будут удалены. История на сервере и другие учётные записи Windows не затрагиваются. Расширения браузера нужно удалить отдельно.",
+        "uninstall_failed": "Не удалось начать удаление. Закройте SOFT Tracking и повторите попытку. Права администратора не требуются.",
+        "uninstall_incomplete": "Удаление SOFT Tracking не завершено. Некоторые локальные файлы или записи регистрации могли остаться. Закройте приложение и повторите удаление через раздел установленных приложений.",
         "overview": "Обзор", "connection": "Подключение", "browsers": "Браузеры", "diagnostics": "Диагностика",
         "language": "Язык", "company_code": "Код установки компании", "employee_key": "Ключ сотрудника",
         "connect": "Подключить этот ПК", "unregistered": "Этот ПК не подключён", "connected": "Подключено",
@@ -130,6 +140,11 @@ TEXT = {
         "update_error": "Обновление требует внимания", "update_idle": "Ожидание", "update_unknown": "Состояние обновления доступно в технических сведениях",
     },
     "cs": {
+        "uninstall_title": "Odinstalovat SOFT Tracking",
+        "uninstall_flush_warning": "Před odstraněním se pokusíme odeslat čekající aktivitu s čekáním nejvýše 5 sekund. Bez připojení, při chybě nebo po vypršení času budou zbývající neodeslaná data ztracena. Pokračovat?",
+        "uninstall_confirm": "Odinstalovat SOFT Tracking pro tento účet Windows?\n\nSledování se zastaví a místní nastavení i neodeslaná aktivita budou odstraněny. Historie na serveru a ostatní účty Windows zůstanou beze změny. Rozšíření prohlížeče je nutné odstranit samostatně.",
+        "uninstall_failed": "Odinstalaci nelze spustit. Zavřete SOFT Tracking a zkuste to znovu. Oprávnění správce nejsou potřeba.",
+        "uninstall_incomplete": "Odinstalace SOFT Tracking nebyla dokončena. Některé místní soubory nebo registrační záznamy mohou zůstat. Zavřete aplikaci a zkuste odinstalaci znovu v seznamu nainstalovaných aplikací.",
         "overview": "Přehled", "connection": "Připojení", "browsers": "Prohlížeče", "diagnostics": "Diagnostika",
         "language": "Jazyk", "company_code": "Instalační kód společnosti", "employee_key": "Klíč zaměstnance",
         "connect": "Připojit tento počítač", "unregistered": "Tento počítač není připojen", "connected": "Připojeno",
@@ -157,6 +172,11 @@ TEXT = {
         "update_error": "Aktualizace vyžaduje pozornost", "update_idle": "Čekání", "update_unknown": "Stav aktualizace je v technických údajích",
     },
     "uz": {
+        "uninstall_title": "SOFT Tracking dasturini o'chirish",
+        "uninstall_flush_warning": "O'chirishdan oldin navbatdagi faollikni yuborishga urinib, ko'pi bilan 5 soniya kutamiz. Internet bo'lmasa, xato yuz bersa yoki vaqt tugasa, yuborilmagan ma'lumotlar yo'qoladi. Davom etilsinmi?",
+        "uninstall_confirm": "SOFT Tracking ushbu Windows hisobi uchun o'chirilsinmi?\n\nKuzatuv to'xtatiladi, mahalliy sozlamalar va yuborilmagan faollik o'chiriladi. Serverdagi tarix va boshqa Windows hisoblari o'zgarmaydi. Brauzer kengaytmalarini alohida o'chirish kerak.",
+        "uninstall_failed": "O'chirishni boshlab bo'lmadi. SOFT Tracking dasturini yoping va qayta urinib ko'ring. Administrator huquqlari talab qilinmaydi.",
+        "uninstall_incomplete": "SOFT Tracking dasturini o'chirish yakunlanmadi. Ba'zi mahalliy fayllar yoki ro'yxat yozuvlari qolgan bo'lishi mumkin. Dasturni yoping va o'rnatilgan ilovalar ro'yxatidan qayta urinib ko'ring.",
         "overview": "Umumiy", "connection": "Ulanish", "browsers": "Brauzerlar", "diagnostics": "Diagnostika",
         "language": "Til", "company_code": "Kompaniya o'rnatish kodi", "employee_key": "Xodim kaliti",
         "connect": "Bu kompyuterni ulash", "unregistered": "Bu kompyuter ulanmagan", "connected": "Ulandi",

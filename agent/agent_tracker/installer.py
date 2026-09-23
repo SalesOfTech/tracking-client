@@ -24,6 +24,7 @@ from .core.signed_updates import verify_manifest, stage_archive
 from .integration import protect_workspace, autostart
 from .core.target import runtime_target
 from .i18n import LANGUAGES, detect_language, translate
+from .uninstaller import register_uninstaller
 
 
 def bootstrap_code(executable):
@@ -176,8 +177,10 @@ def upgrade_existing(bundle,root,language='',integrate=True,health_check=None):
         manager.session.close()
 
 
-def install(bundle, root, company_code, integrate=True, language="", company_resolver=None, health_check=None):
+def install(bundle, root, company_code, integrate=True, language="", company_resolver=None, health_check=None, retire_legacy=True):
     bundle, root = Path(bundle).resolve(), Path(root).resolve()
+    if (root / 'uninstall-requested.json').exists():
+        raise InstallerError('setup_close_required')
     if not re.fullmatch(r"[a-f0-9]{32}",company_code):
         raise InstallerError('setup_code_required')
     resolver = company_resolver or resolve_company
@@ -186,6 +189,8 @@ def install(bundle, root, company_code, integrate=True, language="", company_res
         check_existing_company(root, read_json(root / 'enrollment.json', {}), company_code, resolver)
         launcher = upgrade_existing(bundle,root,language,integrate,health_check)
         if integrate:
+            register_uninstaller(root)
+        if integrate and retire_legacy:
             from .legacy_migration import replace_current_user
             replace_current_user(root)
         return launcher
@@ -197,6 +202,8 @@ def install(bundle, root, company_code, integrate=True, language="", company_res
             launcher = installed_launcher(root)
             if integrate:
                 autostart(launcher, True)
+                register_uninstaller(root)
+            if integrate and retire_legacy:
                 from .legacy_migration import replace_current_user
                 replace_current_user(root)
             return launcher
@@ -228,6 +235,8 @@ def install(bundle, root, company_code, integrate=True, language="", company_res
             register_host(root / executable_name(True,True),root.parent)
             autostart(root / executable_name(False,True),True)
             shortcuts(root)
+            register_uninstaller(root)
+        if integrate and retire_legacy:
             from .legacy_migration import replace_current_user
             replace_current_user(root)
     return root / executable_name(False,True)

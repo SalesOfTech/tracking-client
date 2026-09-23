@@ -167,6 +167,16 @@ class ReleaseManager:
         if pending:
             atomic_json(self.root / "last-good.json", dict(self.active(), previous_version=pending['previous']['version']))
             (self.root / "pending.json").unlink()
+            if os.name == 'nt':
+                from ..uninstaller import register_uninstaller
+                try:
+                    register_uninstaller(self.root)
+                except (OSError, ValueError, KeyError):
+                    # A locked uninstall launcher must not roll back a healthy update.
+                    try:
+                        atomic_json(self.root / 'uninstaller-status.json', {'state': 'repair_required'})
+                    except OSError:
+                        pass
 
     def rollback(self):
         pending = read_json(self.root / "pending.json")

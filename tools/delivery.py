@@ -39,7 +39,16 @@ def export(archive, destination, version):
         if not re.fullmatch(r'SOFT-Tracking-Setup-[0-9.]+\.(exe|dmg|run)', setup['file']):
             raise ValueError('Invalid installer')
         output = []
-        for name, expected in ((setup['file'], setup['sha256']), ('release-' + version + '.zip', manifest['sha256'])):
+        artifacts = [(setup['file'], setup['sha256']), ('release-' + version + '.zip', manifest['sha256'])]
+        if target + '/migration.json' in names:
+            migration = json.loads(bundle.read(target + '/migration.json'))
+            if (not target.startswith('windows-') or migration.get('target') != target or
+                    migration.get('version') != version or
+                    migration.get('file') != 'SOFT-Tracking-Migrate-' + version + '.exe' or
+                    not re.fullmatch('[a-f0-9]{64}', migration.get('sha256', ''))):
+                raise ValueError('Invalid migrator metadata')
+            artifacts.append((migration['file'], migration['sha256']))
+        for name, expected in artifacts:
             path = destination / (target + '--' + name)
             with bundle.open(target + '/' + name) as source, path.open('xb') as sink:
                 shutil.copyfileobj(source, sink, 1024 * 1024)
@@ -87,6 +96,8 @@ def main():
             with zipfile.ZipFile(archive) as bundle:
                 catalog['targets'][target] = {name: json.loads(bundle.read(target + '/' + name))
                                                for name in ('setup.json', 'manifest.json')}
+                if target + '/migration.json' in bundle.namelist():
+                    catalog['targets'][target]['migration.json'] = json.loads(bundle.read(target + '/migration.json'))
             for path in export(archive, root, version):
                 expected.add(path.name)
                 old = existing.get(path.name)

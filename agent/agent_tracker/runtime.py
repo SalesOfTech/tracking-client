@@ -5,6 +5,7 @@ import time
 
 from .core.tracker import ActivityTracker, TrackerConfig
 from .platform import load_platform_adapter
+from .core.lifecycle import Reporter
 
 
 class Worker(threading.Thread):
@@ -18,6 +19,7 @@ class Worker(threading.Thread):
         self.inventory_retry = 0
         self.operation_lock = threading.RLock()
         self._checkpoint_error = ''
+        self.lifecycle = Reporter(client)
 
     def _start_tracker(self):
         if self.stopping.is_set():
@@ -70,6 +72,11 @@ class Worker(threading.Thread):
         with self.operation_lock:
             self._checkpoint_tracker()
             self.stopping.set()
+            try:
+                self.lifecycle.stopping()
+            except Exception:
+                # Telemetry failure must not undo a successful activity checkpoint.
+                pass
 
     def switch_employee(self, company_code, employee_key):
         from . import browser_health
@@ -98,7 +105,18 @@ class Worker(threading.Thread):
         next_config = next_flush = 0
         failures = 0
         while not self.stopping.wait(1):
+            try:
+                with self.operation_lock:
+                    if not self.stopping.is_set():
+                        self.lifecycle.observe()
+                self.lifecycle.deliver()
+            except Exception:
+                self.client.state.set('lifecycle_error', 'availability_delivery_pending')
             next_config, next_flush, failures = self._cycle(next_config, next_flush, failures)
+        try:
+            self.lifecycle.deliver(final=True)
+        except Exception:
+            pass
         with self.operation_lock:
             try:
                 self._checkpoint_tracker()

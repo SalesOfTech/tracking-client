@@ -20,6 +20,13 @@ def app_path(root, native=False):
 def main(native=False, root=None, args=None):
     root = Path(root or Path(sys.executable).resolve().parent)
     args = list(sys.argv[1:] if args is None else args)
+    if not native and '--uninstall' in args:
+        if args != ['--uninstall']:
+            return 2
+        from .uninstaller import main as uninstall_main
+        return uninstall_main(root)
+    if (root / 'uninstall-requested.json').exists():
+        return 1
     if native:
         from .native_host import ALLOWED_ORIGIN
         if not args or args[0] != ALLOWED_ORIGIN:
@@ -30,7 +37,11 @@ def main(native=False, root=None, args=None):
                                creationflags=subprocess.CREATE_NO_WINDOW if os.name=="nt" else 0)
     try:
         with SingleInstance(root / "supervisor.lock"):
+            if (root / 'uninstall-requested.json').exists():
+                return 1
             for _ in range(5):
+                if (root / 'uninstall-requested.json').exists():
+                    return 1
                 result = subprocess.call([str(app_path(root)), "--supervisor", "--installed-root", str(root)] + args)
                 if result != 75:
                     return result

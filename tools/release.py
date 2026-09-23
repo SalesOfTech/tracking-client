@@ -362,6 +362,12 @@ def build(args):
     atomic_json(setup / "trusted-update-keys.json",{args.key_id:public})
     atomic_json(setup / "setup-build.json",metadata)
     freeze("setup_entry.py","SOFT-Tracking-Setup",out,work,[(setup,"setup-payload")],ui=ui)
+    if os_name == 'windows':
+        freeze('migrate_legacy_entry.py', 'SOFT-Tracking-Migrate', out, work,
+               [(setup, 'setup-payload')], console=True, ui=ui)
+        migrator = out / 'SOFT-Tracking-Migrate.exe'
+        atomic_json(out / 'migration.json', dict(file=migrator.name, version=args.version,
+                                               target=target, sha256=file_digest(migrator)))
     if os_name=="macos":
         installer=out / "SOFT-Tracking-Setup.dmg"
         subprocess.run(["hdiutil","create","-volname","SOFT Tracking Setup","-srcfolder",str(out / "SOFT-Tracking-Setup.app"),"-ov",str(installer)],check=True)

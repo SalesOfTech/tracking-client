@@ -117,6 +117,16 @@ def export():
             bundle.write(build/'desktop-package-lock.json', prefix+'desktop-package-lock.json')
         bundle.write(build/installer,prefix+deployed_installer)
         bundle.writestr(prefix+'setup.json',json.dumps(metadata,sort_keys=True))
+        if target().startswith('windows-'):
+            migration = json.loads((build / 'migration.json').read_text(encoding='utf-8'))
+            if (migration.get('file') != 'SOFT-Tracking-Migrate.exe'
+                    or migration.get('target') != target() or migration.get('version') != version()
+                    or migration.get('sha256') != file_digest(build / migration['file'])):
+                raise ValueError('Invalid migration artifact metadata')
+            deployed_migration = 'SOFT-Tracking-Migrate-' + version() + '.exe'
+            bundle.write(build / migration['file'], prefix + deployed_migration)
+            migration['file'] = deployed_migration
+            bundle.writestr(prefix + 'migration.json', json.dumps(migration, sort_keys=True))
         bundle.writestr(prefix+'provenance.json',json.dumps(provenance,sort_keys=True))
     digest=file_digest(published/name)
     (published/(name+'.sha256')).write_text(digest+'  '+name+'\n',encoding='ascii')
