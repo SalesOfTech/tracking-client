@@ -68,13 +68,14 @@ def replace_macos_legacy(root):
             try:
                 if process.uids().real != uid or Path(process.exe()).resolve() not in executables:
                     continue
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                # Unidentified or other-user processes are not migration targets.
+                continue
+            try:
                 process.kill()
                 process.wait(timeout=10)
                 report['stopped'].append(process.pid)
             except psutil.NoSuchProcess:
-                continue
-            except psutil.AccessDenied:
-                # Other users' protected processes are not migration targets.
                 continue
         trash = home / '.Trash'
         trash.mkdir(exist_ok=True, mode=0o700)
