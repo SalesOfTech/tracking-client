@@ -1,6 +1,8 @@
 export type Language = 'en' | 'ru' | 'cs' | 'uz';
 export const languages = {en: 'English', ru: 'Русский', cs: 'Čeština', uz: "O'zbekcha"};
 const rows = {
+  oneKeyHelp: ['Paste your employee key from Tracking settings > Employees. Your company is detected automatically. An older 32-character company code is also accepted.', 'Вставьте ключ сотрудника из настроек Tracking → Сотрудники. Компания определится автоматически. Старый код компании из 32 символов тоже поддерживается.', 'Vložte klíč zaměstnance z nastavení Tracking → Zaměstnanci. Společnost se určí automaticky. Podporován je i původní 32znakový kód společnosti.', "Tracking sozlamalari → Xodimlar bo‘limidagi xodim kalitini kiriting. Kompaniya avtomatik aniqlanadi. Eski 32 belgili kompaniya kodi ham qo‘llanadi."],
+  invalidInstallKey: ['Enter a 64-character employee key or a 32-character company code.', 'Нужен ключ сотрудника из 64 символов или код компании из 32 символов.', 'Zadejte 64znakový klíč zaměstnance nebo 32znakový kód společnosti.', "64 belgili xodim kaliti yoki 32 belgili kompaniya kodini kiriting."],
   connection: ['Connection', 'Подключение', 'Připojení', 'Ulanish'],
   browsers: ['Browsers', 'Браузеры', 'Prohlížeče', 'Brauzerlar'],
   settings: ['Settings', 'Настройки', 'Nastavení', 'Sozlamalar'],

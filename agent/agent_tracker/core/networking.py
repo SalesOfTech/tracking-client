@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 
 import requests
 from requests import Response, Session
+from .endpoints import EndpointTransport
 
 
 LOG = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ class HttpClient:
         if self.session is None:
             self.session = requests.Session()
             self.session.headers.update({"User-Agent": "SOFT.AgentTracker/0.1"})
+        self.transport = EndpointTransport(self.session)
 
     def post_json(
         self,
@@ -36,7 +38,7 @@ class HttpClient:
         for attempt in range(1, retries + 1):
             try:
                 LOG.debug("POST %s (attempt %s)", url, attempt)
-                resp = self.session.post(url, json=payload, timeout=self.timeout, allow_redirects=False)
+                resp = self.transport.request('post', url, json=payload, timeout=self.timeout)
                 if resp.status_code != 200:
                     resp.raise_for_status()
                     raise requests.RequestException("Unexpected response status")

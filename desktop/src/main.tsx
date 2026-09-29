@@ -73,8 +73,8 @@ function App() {
       <div className="install-status">
         {view.busy ? <><ProgressBar aria-label={t('installing')} isIndeterminate><ProgressBar.Track><ProgressBar.Fill/></ProgressBar.Track></ProgressBar><div className="install-progress-label"><Spinner size="sm"/><span>{t('installing')}</span></div></> : view.phase === 'complete' ? <div className="installed-symbol"><CheckCheck size={32}/></div> : null}
         {error}
-        {!view.code && <TextField value={code} onChange={setCode} className="code-field"><Label>{t('companyCode')}</Label><Input autoComplete="off" spellCheck={false}/></TextField>}
-        {view.phase === 'complete' ? <Button onPress={() => void act('launch')} className="wide-button">{t('openApp')}<ArrowRight size={18}/></Button> : !view.busy && <Button isDisabled={busy || !/^[a-f0-9]{32}$/.test(view.code || code)} onPress={() => void act('install', {code: view.code || code})} className="wide-button"><Download size={18}/>{t('install')}</Button>}
+        {!view.code && <><TextField value={code} onChange={setCode} className="code-field"><Label>{t('employeeKey')}</Label><Input autoComplete="off" spellCheck={false} aria-describedby="install-key-help"/></TextField><p id="install-key-help" className="muted">{t('oneKeyHelp')}</p>{code.trim() && !/^(?:[a-f0-9]{32}|[a-f0-9]{64})$/.test(code.trim()) && <p role="alert">{t('invalidInstallKey')}</p>}</>}
+        {view.phase === 'complete' ? <Button onPress={() => void act('launch')} className="wide-button">{t('openApp')}<ArrowRight size={18}/></Button> : !view.busy && <Button isDisabled={busy || !/^(?:[a-f0-9]{32}|[a-f0-9]{64})$/.test(view.code || code.trim())} onPress={() => void act('install', {code: view.code || code.trim()})} className="wide-button"><Download size={18}/>{t('install')}</Button>}
       </div>
       <div className="install-includes"><span><Check size={16}/>{t('files')}</span><span><Check size={16}/>{t('extension')}</span></div>
       <p className="install-safety"><ShieldCheck size={16}/>{t('keepData')}</p>
@@ -99,9 +99,8 @@ function App() {
       {page === 'connection' && (!view.enrolled ? <div className="activation"><div className="activation-icon"><Link size={26}/></div><h2>{t('enterCode')}</h2><p className="muted">{t('activationInfo')}</p>
         {view.company && <div className="company-line"><Building2 size={18}/>{view.company}</div>}
         <form onSubmit={event => {event.preventDefault(); void act('enroll', {code: view.code || code, key: key.trim()});}}>
-          {!view.code && <TextField value={code} onChange={setCode}><Label>{t('companyCode')}</Label><Input autoComplete="off" spellCheck={false}/></TextField>}
           <TextField value={key} onChange={setKey} isRequired><Label>{t('employeeKey')}</Label><Input autoFocus autoComplete="off" spellCheck={false} className="key-input"/></TextField>
-          <Button type="submit" isDisabled={busy || !/^[a-f0-9]{64}$/.test(key.trim()) || !/^[a-f0-9]{32}$/.test(view.code || code)}>{busy ? <Spinner size="sm"/> : <ArrowRight size={18}/>} {t('activate')}</Button>
+          <Button type="submit" isDisabled={busy || !/^[a-f0-9]{64}$/.test(key.trim())}>{busy ? <Spinner size="sm"/> : <ArrowRight size={18}/>} {t('activate')}</Button>
         </form><div className="privacy-notice"><ShieldCheck size={20}/><p>{t('scopeNotice')}</p></div>
       </div> : <>
         <div className={'connection-status ' + (healthy ? 'healthy' : 'attention')}><div className="status-icon">{healthy ? <CheckCheck size={27}/> : <Activity size={27}/>}</div><div><h2>{t(statusText)}</h2><p>{view.company} <span className="dot-separator">·</span> {view.employee}</p></div>{iconButton(t('check'), <RefreshCw size={18} className={busy ? 'spin' : ''}/>, () => void act('check'))}</div>

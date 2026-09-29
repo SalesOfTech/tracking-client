@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import os
+import hashlib
 import platform
 import plistlib
 import re
@@ -32,17 +33,54 @@ def bootstrap_code(executable):
     if code or sys.platform != "darwin":
         return code
     # The company code is on the downloaded DMG, not the .app inside it.
-    data = subprocess.run(["hdiutil","info","-plist"],capture_output=True,check=True).stdout
+    data = subprocess.run(["hdiutil","info","-plist"],capture_output=True,check=True,timeout=10).stdout
+    executable = Path(executable).resolve()
+    candidates = set()
+    app = next((parent for parent in executable.parents if parent.suffix == '.app'), None)
     for image in plistlib.loads(data).get("images",[]):
         for entity in image.get("system-entities",[]):
             mount = entity.get("mount-point")
-            if mount and Path(mount).resolve() in Path(executable).resolve().parents:
+            if mount and Path(mount).resolve() in executable.parents:
                 return company_code_from_filename(image.get("image-path",""))
+            # Gatekeeper may run the same bundle from AppTranslocation instead of the DMG.
+            # Match executable contents and refuse ambiguous company images.
+            if mount and app and 'AppTranslocation' in executable.parts:
+                original = Path(mount) / app.name / executable.relative_to(app)
+                if original.is_file():
+                    def digest(path):
+                        value = hashlib.sha256()
+                        with path.open('rb') as stream:
+                            for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                                value.update(chunk)
+                        return value.digest()
+                    if digest(original) == digest(executable):
+                        candidate = company_code_from_filename(image.get('image-path', ''))
+                        if candidate:
+                            candidates.add(candidate)
+    if len(candidates) == 1:
+        return candidates.pop()
     return ""
 
 
 class InstallerError(ValueError):
     pass
+
+
+def resolve_employee_key(key, company_code=''):
+    if not re.fullmatch('[a-f0-9]{64}', key):
+        raise InstallerError('setup_code_required')
+    http = HttpClient('https://tracking.salesoftech.com')
+    try:
+        payload = {'employee_key': key}
+        if company_code:
+            payload['company_code'] = company_code
+        result = http.post_json('/client/v3/installation', payload)
+        if (result.get('ok') is not True or type(result.get('company_id')) is not int or
+                type(result.get('user_id')) is not int or not re.fullmatch('[a-f0-9]{32}', result.get('company_code', ''))):
+            raise InstallerError('setup_company_unavailable')
+        return result
+    finally:
+        http.session.close()
 
 
 def resolve_company(code):
@@ -58,6 +96,30 @@ def resolve_company(code):
         return company
     except Exception as error:
         raise InstallerError('setup_company_unavailable') from error
+
+
+def install_for_employee(bundle, root, key, company_code='', language=''):
+    from .core.client import Client
+    from .legacy_migration import replace_current_user
+    root = Path(root)
+    old = read_json(root / 'enrollment.json', {})
+    assignment = resolve_employee_key(key, old.get('company_code') or company_code)
+    code = assignment['company_code']
+    client = Client(root.parent)
+    try:
+        identity = client.state.get('identity')
+        if identity and (identity.get('company_id') != assignment['company_id'] or identity.get('user_id') != assignment['user_id']):
+            raise InstallerError('setup_company_conflict')
+    finally:
+        client.close()
+    launcher = install(bundle, root, code, language=language, retire_legacy=False)
+    client = Client(root.parent)
+    try:
+        client.enroll(code, key)
+    finally:
+        client.close()
+    replace_current_user(root)
+    return launcher, code
 
 
 def check_existing_company(root, existing, company_code, resolver):
@@ -258,7 +320,10 @@ def shortcuts(root):
         script.write_text('#!/bin/sh\nexec '+shlex.quote(str(launcher))+' "$@"\n',encoding="utf-8")
         script.chmod(0o700)
         with (app / "Info.plist").open("wb") as stream:
-            plistlib.dump({"CFBundleName":"SOFT Tracking","CFBundleIdentifier":"com.soft.tracking","CFBundleExecutable":"tracking","CFBundlePackageType":"APPL"},stream)
+            plistlib.dump({"CFBundleName":"SOFT Tracking","CFBundleDisplayName":"SOFT Tracking","CFBundleIdentifier":"com.soft.tracking","CFBundleExecutable":"tracking","CFBundlePackageType":"APPL","CFBundleVersion":"1.0","CFBundleInfoDictionaryVersion":"6.0"},stream)
+        registry = Path('/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister')
+        if registry.is_file():
+            subprocess.run([str(registry), '-f', str(app.parent)], check=True, timeout=15, capture_output=True)
     else:
         folder=Path(os.environ.get("XDG_DATA_HOME",Path.home()/".local"/"share")) / "applications"
         folder.mkdir(parents=True,exist_ok=True)
@@ -272,6 +337,7 @@ class InstallerWindow:
         from tkinter import ttk
         from .ui.theme import apply_theme
         self.bundle = Path(bundle)
+        self.company_code = company_code
         self.language_override = language if language in LANGUAGES else ""
         self.language = detect_language(language)
         self.thread = None
@@ -294,7 +360,7 @@ class InstallerWindow:
             self.translations.append((widget, key))
             return widget
         label("setup_subtitle", style="Muted.TLabel").grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 24))
-        label("company_code").grid(row=2, column=0, columnspan=2, sticky="w")
+        label("employee_key").grid(row=2, column=0, columnspan=2, sticky="w")
         self.code = ttk.Entry(frame)
         self.code.insert(0, company_code)
         self.code.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 12))
@@ -357,7 +423,10 @@ class InstallerWindow:
         self.progress.start()
         def task():
             try:
-                self.outcome["launcher"] = install(self.bundle, workspace() / "install", value, language=language)
+                if re.fullmatch('[a-f0-9]{64}', value):
+                    self.outcome['launcher'], _ = install_for_employee(self.bundle, workspace() / 'install', value, self.company_code, language)
+                else:
+                    self.outcome["launcher"] = install(self.bundle, workspace() / "install", value, language=language)
             except InstallerError as error:
                 self.outcome["error_key"] = str(error)
             except Exception as error:

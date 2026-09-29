@@ -8,8 +8,8 @@ function validate(action, input = {}) {
     enroll: ['code', 'key'], 'switch-employee': ['key'], 'browser-page': ['browser'], preferences: ['language'], open: ['target'], install: ['code'],
   }[action] || [];
   if (Object.keys(input).some(key => !allowed.includes(key))) throw Error('invalid_request');
-  if (action === 'enroll' && (!/^[a-f0-9]{64}$/.test(input.key) || !/^[a-f0-9]{32}$/.test(input.code))) throw Error('invalid_employee_key');
-  if (action === 'install' && !/^[a-f0-9]{32}$/.test(input.code)) throw Error('setup_code_required');
+  if (action === 'enroll' && (!/^[a-f0-9]{64}$/.test(input.key) || (input.code && !/^[a-f0-9]{32}$/.test(input.code)))) throw Error('invalid_employee_key');
+  if (action === 'install' && !/^(?:[a-f0-9]{32}|[a-f0-9]{64})$/.test(input.code)) throw Error('setup_code_required');
   if (action === 'switch-employee' && !/^[a-f0-9]{64}$/.test(input.key)) throw Error('invalid_employee_key');
   if (action === 'browser-page' && !['Chrome', 'Edge', 'Yandex', 'Opera', 'Brave', 'Vivaldi', 'Chromium', 'Firefox'].includes(input.browser)) throw Error('invalid_request');
   if (action === 'preferences' && !LANGUAGES.has(input.language)) throw Error('invalid_request');

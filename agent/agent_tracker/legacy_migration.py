@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import re
+import sys
 
 import psutil
 
@@ -40,6 +41,9 @@ def removable(path, profile):
 
 
 def replace_current_user(root, *, session_id=None, expected_files=None):
+    if sys.platform == 'darwin':
+        from .macos_legacy import replace_macos_legacy
+        return replace_macos_legacy(root)
     if os.name != 'nt':
         return {'state': 'not_applicable'}
     import winreg

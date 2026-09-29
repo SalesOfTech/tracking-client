@@ -75,6 +75,17 @@ const root = path.resolve(__dirname, '../dist');
     await page.locator('.stop-confirmation').getByRole('button', {name: 'Остановить агент', exact: true}).click();
     await page.getByRole('status').filter({hasText: 'Агент не остановлен'}).waitFor();
     await page.setViewportSize({width: 560, height: 610});
+    for (const language of ['en','ru','cs','uz']) {
+      await page.goto(`${origin}/?preview=1&mode=installer&noCode=1&lang=${language}`);
+      const key = page.locator('.code-field input');
+      await key.fill('short');
+      assert.equal(await page.locator('.wide-button').isEnabled(), false);
+      await key.fill('c'.repeat(64));
+      assert.equal(await page.locator('.wide-button').isEnabled(), true);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      await page.screenshot({path:path.join(output,`single-key-installer-${language}.png`)});
+      await page.locator('.wide-button').click();
+    }
     await page.goto(`${origin}/?preview=1&mode=installer&lang=ru&theme=dark`);
     await page.getByRole('heading', {name: 'Устанавливаем SOFT Tracking'}).waitFor();
     await page.screenshot({path: path.join(output, 'electron-installer-progress.png')});

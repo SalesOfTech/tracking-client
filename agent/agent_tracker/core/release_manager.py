@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 import requests
+from .endpoints import EndpointTransport, trusted_tracking_url
 from .files import atomic_json, inside, read_json
 from .signed_updates import (verify_manifest, stage_archive, MAX_ARCHIVE_BYTES, MAX_UNPACKED_BYTES,
                              runtime_compatible, release_environment_headers)
@@ -30,6 +31,7 @@ class ReleaseManager:
     def __init__(self, root, session=None):
         self.root = Path(root).resolve()
         self.session = session or requests.Session()
+        self.transport = EndpointTransport(self.session)
         self.keys = read_json(self.root / "trusted-update-keys.json", {})
         self._environment_headers()
 
@@ -57,7 +59,7 @@ class ReleaseManager:
             raise ValueError("Invalid release target")
         url = "https://tracking.salesoftech.com/client/v3/releases/" + target + "/manifest.json"
         headers = dict(self._environment_headers(), **{'X-Tracking-Client-Version': active['version']})
-        with self.session.get(url, timeout=(10, 30), allow_redirects=False, stream=True, headers=headers) as response:
+        with self.transport.request('get', url, timeout=(10, 30), stream=True, headers=headers) as response:
             if response.status_code == 404:
                 return None
             if response.status_code != 200:
@@ -84,7 +86,7 @@ class ReleaseManager:
         if not runtime_compatible(manifest):
             raise ValueError('Update requires a newer operating system; current version retained')
         url=urlparse(manifest['url'])
-        if url.scheme!='https' or url.hostname!='tracking.salesoftech.com' or url.port not in (None,443) or url.username or url.password:
+        if not trusted_tracking_url(manifest['url']):
             raise ValueError('Release credentials cannot be sent to another origin')
         if shutil.disk_usage(self.root).free < manifest['size'] + MAX_UNPACKED_BYTES + 128*1024*1024:
             raise ValueError('Update postponed: insufficient free disk space; activity queue retained')
@@ -95,7 +97,7 @@ class ReleaseManager:
         digest = hashlib.sha256()
         started = time.monotonic()
         try:
-            with self.session.get(manifest["url"], timeout=(10, 30), stream=True, allow_redirects=False) as response:
+            with self.transport.request('get', manifest["url"], timeout=(10, 30), stream=True) as response:
                 if response.status_code != 200:
                     raise ValueError("Release download failed")
                 with archive.open("xb") as output:

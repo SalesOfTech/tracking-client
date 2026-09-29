@@ -16,7 +16,7 @@ let preview: View = {
   mode: new URLSearchParams(location.search).get('mode') === 'installer' ? 'installer' : 'desktop',
   language: (new URLSearchParams(location.search).get('lang') || 'ru') as Language,
   theme: 'system',
-  version: '3.2.0', code: 'a'.repeat(32), busy: false, error: '', message: '', phase: 'waiting',
+  version: '3.3.0', code: new URLSearchParams(location.search).get('noCode') === '1' ? '' : 'a'.repeat(32), busy: false, error: '', message: '', phase: 'waiting',
   enrolled: new URLSearchParams(location.search).get('enroll') !== '1',
   company: 'Demo company', employee: 'Demo employee', collection: new URLSearchParams(location.search).get('paused') === '1' ? 'paused_local' : 'recording', pending: 0, rejected: 0,
   receipt: {hostname: 'demo.kommo.com', timestamp: Date.now()/1000-90, end_timestamp: Date.now()/1000-15, confirmed_at: Date.now()/1000-5},

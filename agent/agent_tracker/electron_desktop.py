@@ -48,7 +48,9 @@ def validate(action, data):
               'launch': (), 'ready': ()}
     if action not in fields or not isinstance(data, dict) or set(data) - set(fields[action]):
         raise ValueError('invalid_request')
-    if action in ('enroll', 'install') and not re.fullmatch('[a-f0-9]{32}', str(data.get('code', ''))):
+    if action == 'install' and not re.fullmatch('(?:[a-f0-9]{32}|[a-f0-9]{64})', str(data.get('code', ''))):
+        raise ValueError('setup_code_required')
+    if action == 'enroll' and data.get('code') and not re.fullmatch('[a-f0-9]{32}', str(data['code'])):
         raise ValueError('setup_code_required')
     if action in ('enroll', 'switch-employee') and not re.fullmatch('[a-f0-9]{64}', str(data.get('key', ''))):
         raise ValueError('invalid_employee_key')
@@ -148,13 +150,19 @@ class Controller:
         if self.health:
             raise ValueError('invalid_request')
         if action == 'install' and self.bundle:
-            if self.code and self.code != data['code']:
+            if self.code and len(data['code']) == 32 and self.code != data['code']:
                 raise ValueError('setup_company_conflict')
-            self.code = data['code']
             def install():
-                from .installer import install
+                from .installer import install, install_for_employee
                 self.phase = 'installing'
-                self.launcher = install(self.bundle, workspace() / 'install', self.code, language=self.language)
+                root = workspace() / 'install'
+                employee_key = data['code'] if len(data['code']) == 64 else ''
+                if employee_key:
+                    self.launcher, self.code = install_for_employee(self.bundle, root, employee_key, self.code, self.language)
+                    data['code'] = ''
+                else:
+                    self.code = data['code']
+                    self.launcher = install(self.bundle, root, self.code, language=self.language, retire_legacy=False)
                 self.phase = 'complete'
             self.task(install)
         elif action == 'launch' and self.bundle:
@@ -165,10 +173,19 @@ class Controller:
         elif action == 'enroll' and self.client:
             if self.client.state.get('identity'):
                 raise ValueError('already_registered')
-            if self.code and self.code != data['code']:
+            if self.code and data.get('code') and self.code != data['code']:
                 raise ValueError('setup_company_conflict')
             def enroll():
-                self.client.enroll(self.code or data['code'], data['key'])
+                from .installer import resolve_employee_key
+                code = self.code or data.get('code', '')
+                if not code:
+                    code = resolve_employee_key(data['key'])['company_code']
+                    atomic_json(self.install / 'enrollment.json', dict(read_json(self.install / 'enrollment.json', {}), company_code=code))
+                    self.code = code
+                self.client.enroll(code, data['key'])
+                if self.install:
+                    from .legacy_migration import replace_current_user
+                    replace_current_user(self.install)
                 self.worker.sync_requested.set()
                 self.message = 'connected'
             self.task(enroll)
