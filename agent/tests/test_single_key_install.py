@@ -21,7 +21,10 @@ class SingleKeyTests(unittest.TestCase):
             calls = []
             client = Mock()
             client.state.get.return_value = None
-            client.enroll.side_effect = lambda *args: calls.append('enroll')
+            def enrolled(*args):
+                calls.append('enroll')
+                return {'company_id':32,'user_id':100}
+            client.enroll.side_effect = enrolled
             with patch('agent_tracker.electron_desktop.workspace', return_value=root), \
                  patch('agent_tracker.core.client.Client', return_value=client), \
                  patch('agent_tracker.installer.resolve_employee_key', return_value={'company_code': 'a'*32, 'company_id':32,'user_id':100}), \

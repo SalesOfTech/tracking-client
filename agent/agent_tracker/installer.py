@@ -75,8 +75,8 @@ def resolve_employee_key(key, company_code=''):
         if company_code:
             payload['company_code'] = company_code
         result = http.post_json('/client/v3/installation', payload)
-        if (result.get('ok') is not True or type(result.get('company_id')) is not int or
-                type(result.get('user_id')) is not int or not re.fullmatch('[a-f0-9]{32}', result.get('company_code', ''))):
+        if (result.get('ok') is not True or type(result.get('company_id')) is not int or result['company_id'] <= 0 or
+                type(result.get('user_id')) is not int or result['user_id'] <= 0 or not re.fullmatch('[a-f0-9]{32}', result.get('company_code', ''))):
             raise InstallerError('setup_company_unavailable')
         return result
     finally:
@@ -115,7 +115,9 @@ def install_for_employee(bundle, root, key, company_code='', language=''):
     launcher = install(bundle, root, code, language=language, retire_legacy=False)
     client = Client(root.parent)
     try:
-        client.enroll(code, key)
+        identity = client.enroll(code, key)
+        if identity.get('company_id') != assignment['company_id'] or identity.get('user_id') != assignment['user_id']:
+            raise InstallerError('setup_company_conflict')
     finally:
         client.close()
     replace_current_user(root)
