@@ -34,7 +34,7 @@ const {packagePolicy} = require('./package-policy.cjs');
       execFileSync('/usr/bin/plutil', ['-replace', 'CFBundleDisplayName', '-string', 'SOFT Tracking', path.join(contents, 'Info.plist')]);
       const frameworks = path.join(contents, 'Frameworks');
       for (const entry of await fs.readdir(frameworks)) {
-        if (entry.startsWith('SOFT Tracking Helper') && entry.endsWith('.app')) {
+        if (entry.endsWith('.framework') || (entry.startsWith('SOFT Tracking Helper') && entry.endsWith('.app'))) {
           execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', path.join(frameworks, entry)]);
         }
       }
