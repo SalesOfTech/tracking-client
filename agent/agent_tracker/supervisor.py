@@ -3,6 +3,7 @@ import os
 import subprocess
 import time
 import uuid
+from packaging.version import Version
 from pathlib import Path
 from .core.files import atomic_json, read_json
 from .core.release_manager import ReleaseManager, release_path, executable_name
@@ -57,7 +58,10 @@ def main(root, autostart=False):
             manifest = manager.check()
             if not manifest:
                 failed = read_json(root / 'failed.json', {})
-                atomic_json(root / 'update-status.json', {'state':'rolled_back' if failed.get('version') else 'active', 'version':manager.active()['version'], 'failed_version':failed.get('version'), 'checked_at':int(time.time())})
+                active_version = manager.active()['version']
+                failed_version = failed.get('version')
+                unresolved = failed_version and Version(failed_version) > Version(active_version)
+                atomic_json(root / 'update-status.json', {'state':'rolled_back' if unresolved else 'active', 'version':active_version, 'failed_version':failed_version if unresolved else None, 'checked_at':int(time.time())})
                 continue
             atomic_json(root / "update-status.json", {"state":"downloading", "version":manifest["version"]})
             archive = manager.download(manifest)
