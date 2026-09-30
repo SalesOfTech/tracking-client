@@ -13,8 +13,8 @@ class AutomaticMigrationTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name) / 'v3'
-        self.bundle = Path(temporary.name) / 'bundle'
+        self.root = Path(temporary.name).resolve() / 'v3'
+        self.bundle = Path(temporary.name).resolve() / 'bundle'
         self.snapshot = dict(root=str(self.root), owner='fixture', metadata=dict(
             company_id=1, install_id='9e2d3d72-8594-4d1e-b7a7-99dbbe937d61',
             username='fixture', machine='fixture-pc', os='windows'))
