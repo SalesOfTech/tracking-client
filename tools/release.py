@@ -26,6 +26,19 @@ TRANSITION_ARCHIVE_BYTES = 250 * 1024 * 1024
 TRANSITION_UNPACKED_BYTES = 750 * 1024 * 1024
 
 
+def create_macos_image(source, destination):
+    command = ['hdiutil', 'create', '-volname', 'SOFT Tracking Setup', '-srcfolder', str(source), '-ov', str(destination)]
+    for attempt in range(3):
+        result = subprocess.run(command, capture_output=True, text=True, timeout=600)
+        if result.returncode == 0:
+            return
+        output = (result.stdout or '') + (result.stderr or '')
+        if 'resource busy' not in output.lower() or attempt == 2:
+            raise subprocess.CalledProcessError(result.returncode, command, output=result.stdout, stderr=result.stderr)
+        print('DMG resource busy; retrying image creation', flush=True)
+        time.sleep(10 * (attempt + 1))
+
+
 def require_github_runner():
     if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted':
         raise RuntimeError('Native release builds run only on GitHub-hosted Actions runners')
@@ -370,7 +383,7 @@ def build(args):
                                                target=target, sha256=file_digest(migrator)))
     if os_name=="macos":
         installer=out / "SOFT-Tracking-Setup.dmg"
-        subprocess.run(["hdiutil","create","-volname","SOFT Tracking Setup","-srcfolder",str(out / "SOFT-Tracking-Setup.app"),"-ov",str(installer)],check=True)
+        create_macos_image(out / 'SOFT-Tracking-Setup.app', installer)
     elif os_name=="windows": installer=out / "SOFT-Tracking-Setup.exe"
     else:
         installer=out / "SOFT-Tracking-Setup.run"
