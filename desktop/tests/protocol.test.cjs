@@ -1,11 +1,11 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {validate} = require('../protocol.cjs');
+const {validate, BROWSER_PAGES} = require('../protocol.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 
 test('renderer may only issue narrow, typed commands', () => {
-  for (const action of ['status', 'check', 'repair', 'retry', 'resume', 'ready']) assert.equal(validate(action).action, action);
+  for (const action of ['status', 'check', 'check-update', 'repair', 'retry', 'resume', 'ready']) assert.equal(validate(action).action, action);
   for (const input of [{paused: false}, {policy: {}}, {enabled: true}]) assert.throws(() => validate('resume', input));
   assert.throws(() => validate('pause'));
   assert.throws(() => validate('exec', {command: 'arbitrary'}));
@@ -15,6 +15,30 @@ test('renderer may only issue narrow, typed commands', () => {
   assert.throws(() => validate('status', {secret: 'x'}));
   assert.throws(() => validate('enroll', {code: 'a'.repeat(32), key: 'invalid'}));
   assert.equal(validate('enroll', {code: 'a'.repeat(32), key: 'b'.repeat(64)}).action, 'enroll');
+});
+
+test('manual update checks accept only an empty input', () => {
+  assert.deepEqual(validate('check-update', {}), {action: 'check-update', input: {}});
+  for (const input of [{force: true}, {url: 'https://untrusted.example'}, {version: 'next'}, {browser: 'Chrome'}, [], null, '']) {
+    assert.throws(() => validate('check-update', input), /invalid_request/);
+  }
+});
+
+test('copy-browser-page maps only the eight fixed browser families', () => {
+  assert.deepEqual(BROWSER_PAGES, {Chrome: 'chrome://extensions', Edge: 'edge://extensions', Yandex: 'browser://extensions', Opera: 'opera://extensions', Brave: 'brave://extensions', Vivaldi: 'vivaldi://extensions', Chromium: 'chrome://extensions', Firefox: 'about:addons'});
+  assert.ok(Object.isFrozen(BROWSER_PAGES));
+  for (const browser of Object.keys(BROWSER_PAGES)) assert.deepEqual(validate('copy-browser-page', {browser}), {action: 'copy-browser-page', input: {browser}});
+  for (const input of [{}, {browser: 'chrome'}, {browser: 'Safari'}, {browser: 'toString'}, {browser: '__proto__'}, {browser: ['Chrome']}, {browser: 'Chrome', url: 'file:///secret'}, {browser: 'Chrome', text: 'arbitrary'}]) {
+    assert.throws(() => validate('copy-browser-page', input), /invalid_request/);
+  }
+});
+
+test('desktop browser-page controls only copy addresses and never use navigator.clipboard', () => {
+  for (const file of ['main.tsx', 'Guide.tsx', 'BrowserPageButton.tsx', 'bridge.ts']) {
+    const source = fs.readFileSync(path.join(__dirname, '../src', file), 'utf8');
+    assert.doesNotMatch(source, /(?:act|onAction|invoke)\('browser-page'/);
+    assert.ok(!source.includes('navigator.clipboard'));
+  }
 });
 
 test('employee switch, admin stop and browser pages cannot supply arbitrary authority or URLs', () => {

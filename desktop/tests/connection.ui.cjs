@@ -18,20 +18,20 @@ async function layout(page) {
     const clipped = [...content.querySelectorAll('button, h2, h3, p, strong')].filter(node => node.clientWidth && node.scrollWidth > node.clientWidth + 1).map(node => node.textContent);
     return {
       overflow: document.documentElement.scrollWidth > innerWidth || content.scrollWidth > scroll.clientWidth,
-      overlap, clipped, overflowY: style.overflowY, scrollbarWidth: scrollbar.width, scrollbarDisplay: scrollbar.display, scrollbarGutter: style.scrollbarGutter, standardWidth: style.scrollbarWidth, standardColor: style.scrollbarColor, scrollbarSpace: scroll.offsetWidth - scroll.clientWidth,
+      overlap, clipped, verticalOverflow: scroll.scrollHeight > scroll.clientHeight, overflowY: style.overflowY, scrollbarWidth: scrollbar.width, scrollbarDisplay: scrollbar.display, scrollbarGutter: style.scrollbarGutter, standardWidth: style.scrollbarWidth, standardColor: style.scrollbarColor, scrollbarSpace: scroll.offsetWidth - scroll.clientWidth,
       brandLoaded: [...document.querySelectorAll('.brand img')].every(img => img.complete && img.naturalWidth > 0),
     };
   });
   assert.equal(result.overflow, false, JSON.stringify(result));
   assert.equal(result.overlap, false, JSON.stringify(result));
   assert.deepEqual(result.clipped, []);
-  assert.equal(result.overflowY, 'scroll');
+  assert.equal(result.overflowY, 'auto');
   assert.equal(result.scrollbarWidth, '12px');
   assert.notEqual(result.scrollbarDisplay, 'none');
-  assert.equal(result.scrollbarGutter, 'stable');
+  assert.equal(result.scrollbarGutter, 'auto');
   assert.equal(result.standardWidth, 'auto');
   assert.equal(result.standardColor, 'auto');
-  assert.equal(result.scrollbarSpace, 12);
+  assert.equal(result.scrollbarSpace, result.verticalOverflow ? 12 : 0);
   assert.equal(result.brandLoaded, true);
 }
 
@@ -44,7 +44,7 @@ async function verifyConnection(browser, origin, output) {
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
       try {
-        for (const viewport of [{width: 1024, height: 760}, {width: 700, height: 560}, {width: 390, height: 640}, {width: 320, height: 568}]) {
+        for (const viewport of [{width: 1600, height: 900}, {width: 1024, height: 760}, {width: 700, height: 560}, {width: 390, height: 640}, {width: 320, height: 568}]) {
           await page.setViewportSize(viewport);
           for (const [state, [tone, title]] of Object.entries(states)) {
             await page.goto(`${origin}/?preview=1&lang=${language}&state=${state}&theme=${theme === 'light' ? 'dark' : 'light'}`);
@@ -54,6 +54,9 @@ async function verifyConnection(browser, origin, output) {
             assert.equal(await page.locator('.connection-page [role="status"]').count(), 1);
             assert.equal(await page.locator('.connection-page .notice').count(), 0);
             assert.equal(await page.getByRole('button', {name: text(language, 'check'), exact: true}).count(), 0);
+            assert.equal(await page.getByRole('button', {name: text(language, 'dashboard'), exact: true}).count(), 0);
+            assert.equal(await page.locator('.connection-actions').count(), 0);
+            assert.equal(await page.locator('.queue-row').evaluate(el => getComputedStyle(el).borderBottomWidth), '0px');
             assert.equal(await page.locator('html').getAttribute('data-theme'), theme);
             assert.equal(await page.locator('html').getAttribute('lang'), language);
             const colors = await page.locator('.status-icon').evaluate((icon, tone) => {

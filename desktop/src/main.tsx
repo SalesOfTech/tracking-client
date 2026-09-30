@@ -1,11 +1,13 @@
 import {lazy, Suspense, useEffect, useRef, useState, type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {Button, Chip, Input, Label, ListBox, ProgressBar, ScrollShadow, Select, Spinner, TextField, Tooltip} from '@heroui/react';
-import {ArrowLeft, ArrowRight, Check, CheckCheck, CircleHelp, Clock3, Download, ExternalLink, FolderOpen, Globe2, Link, Minus, Monitor, Play, RefreshCw, Settings2, ShieldCheck, X, AlertCircle, Building2, UserRound, UserRoundPen, Square, ChevronRight} from 'lucide-react';
+import {ArrowLeft, ArrowRight, Check, CheckCheck, CircleHelp, Clock3, Download, FolderOpen, Globe2, Link, Minus, Monitor, Play, RefreshCw, Settings2, ShieldCheck, X, AlertCircle, Building2, UserRound, UserRoundPen, Square, ChevronRight} from 'lucide-react';
 import brand from '../../extension/icons/icon128.png';
 import {invoke, isPreview, nativeFrame, type View} from './bridge';
 import {languages, text, type Language, type Message} from './locale';
 import {connectionState, viewIsBusy} from './connection-state';
+import {updateState} from './update-state';
+import {BrowserPageButton} from './BrowserPageButton';
 import './styles.css';
 const Guide = lazy(() => import('./Guide').then(module => ({default: module.Guide})));
 
@@ -13,6 +15,8 @@ function App() {
   const [view, setView] = useState<View | null>(null), [failed, setFailed] = useState(false);
   const [page, setPage] = useState('connection'), [key, setKey] = useState(''), [code, setCode] = useState('');
   const [localBusy, setLocalBusy] = useState(false), [localError, setLocalError] = useState(false);
+  const [updateRequestPending, setUpdateRequestPending] = useState(false), [updateRequestFailed, setUpdateRequestFailed] = useState(false);
+  const updateRequest = useRef(false);
   const [switching, setSwitching] = useState(false), [confirmStop, setConfirmStop] = useState(false);
   const started = useRef(false), autoInstalled = useRef(false), mounted = useRef(true);
   const language = view?.language || 'en', t = (id: Message) => text(language, id);
@@ -55,6 +59,18 @@ function App() {
   useEffect(() => {document.documentElement.lang = language;}, [language]);
   useEffect(() => {if (view?.message === 'employee_changed') {setSwitching(false); setKey('');}}, [view?.message]);
   async function act(action: string, input = {}) {
+    if (action === 'copy-browser-page') {await invoke(action, input); return;}
+    if (action === 'check-update') {
+      if (!view || updateRequest.current || updateState(view).disabled) return;
+      updateRequest.current = true; setUpdateRequestPending(true); setUpdateRequestFailed(false);
+      try {
+        const state = await invoke('check-update', {});
+        // An updater response must not replace newer connection/employee state.
+        setView(current => current && (current.updateCheckedAt || 0) > (state.updateCheckedAt || 0) ? current : current && {...current, update: state.update, updateAvailable: state.updateAvailable, updateChecking: state.updateChecking, updateCheckedAt: state.updateCheckedAt});
+      } catch {setUpdateRequestFailed(true);}
+      finally {updateRequest.current = false; setUpdateRequestPending(false);}
+      return;
+    }
     setLocalBusy(true); setLocalError(false);
     try {const state = await invoke(action, input); setView(state); setFailed(false); if (action === 'enroll') setKey('');}
     catch {setLocalError(true);}
@@ -96,6 +112,7 @@ function App() {
   const connectedBrowsers = browsers.filter(row => row.connected === true && !row.error);
   const status = connectionState(view, Boolean(busy), failed || localError);
   const hasReceipt = status.receipt === 'recent' || status.receipt === 'stale';
+  const updates = updateState(view, updateRequestPending, updateRequestFailed);
   return <div className="app-shell">{titlebar}<div className="workspace">
     <aside className="sidebar"><div className="brand"><img src={brand} alt=""/><strong>SOFT<br/>Tracking</strong></div>
       <nav>{([['connection', Link], ['browsers', Globe2], ['settings', Settings2]] as const).map(([id, Icon]) => <Button key={id} variant="ghost" aria-label={t(id)} aria-current={page === id ? 'page' : undefined} onPress={() => setPage(id)}><Icon size={19}/><span>{t(id)}</span></Button>)}</nav>
@@ -129,14 +146,21 @@ function App() {
         {switching && <form className="employee-switch" onSubmit={event => {event.preventDefault(); void act('switch-employee', {key: key.trim()});}}><h3>{t('switchEmployee')}</h3><p className="muted">{t('switchNotice')}</p><TextField value={key} onChange={setKey} isRequired><Label>{t('employeeKey')}</Label><Input autoFocus autoComplete="off" spellCheck={false}/></TextField><div className="actions"><Button type="submit" isDisabled={busy || !/^[a-f0-9]{64}$/.test(key.trim())}><UserRoundPen size={16}/>{t('switchEmployee')}</Button><Button variant="ghost" isDisabled={busy} onPress={() => {setSwitching(false); setKey('');}}>{t('cancel')}</Button></div></form>}
         <section className="receipt-section" data-receipt={status.receipt}><h3>{t('confirmed')}</h3>{hasReceipt ? <><div className="receipt-title"><Globe2 size={18}/><strong>{receipt.hostname}</strong><span>{Math.round(receipt.end_timestamp! - receipt.timestamp!)} {t('seconds')}</span></div><p className="muted time-range"><time>{date(receipt.timestamp)}</time><ArrowRight size={13}/><time>{date(receipt.end_timestamp)}</time></p><div className="delivery-line"><ShieldCheck size={16}/><span>{t('delivered')}</span><time>{date(receipt.confirmed_at)}</time></div></> : <p className="receipt-empty">{t('noConfirmedSession')}</p>}</section>
         <div className="queue-row"><span><Clock3 size={17}/>{t('pending')}<strong>{view.pending}</strong></span><span><AlertCircle size={17}/>{t('rejected')}<strong>{view.rejected}</strong></span></div>
-        <div className="actions connection-actions"><Button variant="secondary" isDisabled={!(view.domains || []).some(domain => /\.(kommo\.com|amocrm\.ru)$/.test(domain))} onPress={() => void act('open', {target: 'dashboard'})}>{t('dashboard')}<ExternalLink size={16}/></Button></div>
       </>)}
-      {page === 'browsers' && <><p className="muted section-intro">{t('browserNotice')}</p><div className="browser-list">{browsers.length ? browsers.map((row, index) => <div key={index} className="browser-row"><Globe2 size={25}/><div><strong>{row.family}</strong><p className="muted">{row.version} · {t('lastContact')}: {date(row.last_seen)}</p></div><span className={row.connected && !row.error ? 'success' : 'warning-text'}>{t(row.connected && !row.error ? 'connected' : 'waiting')}</span>{iconButton(t('browserPage'), <ExternalLink size={17}/>, () => void act('browser-page', {browser: row.family}))}</div>) : <div className="empty-state">{t('noBrowsers')}</div>}</div><div className="actions"><Button onPress={() => void act('repair')} isDisabled={busy}><RefreshCw size={17}/>{t('repair')}</Button><Button variant="secondary" onPress={() => void act('open', {target: 'extension'})}><FolderOpen size={17}/>{t('extensionFolder')}</Button><Button variant="ghost" onPress={() => setPage('help')}>{t('help')}<ChevronRight size={16}/></Button></div></>}
+      {page === 'browsers' && <><p className="muted section-intro">{t('browserNotice')}</p><p className="copy-instructions muted">{t('copyBrowserInstructions')}</p><div className="browser-list">{browsers.length ? browsers.map((row, index) => <div key={index} className="browser-row"><Globe2 size={25}/><div><strong>{row.family}</strong><p className="muted">{row.version} · {t('lastContact')}: {date(row.last_seen)}</p></div><span className={row.connected && !row.error ? 'success' : 'warning-text'}>{t(row.connected && !row.error ? 'connected' : 'waiting')}</span><BrowserPageButton family={row.family} language={language} onAction={act} compact/></div>) : <div className="empty-state">{t('noBrowsers')}</div>}</div><div className="actions"><Button onPress={() => void act('repair')} isDisabled={busy}><RefreshCw size={17}/>{t('repair')}</Button><Button variant="secondary" onPress={() => void act('open', {target: 'extension'})}><FolderOpen size={17}/>{t('extensionFolder')}</Button><Button variant="ghost" onPress={() => setPage('help')}>{t('help')}<ChevronRight size={16}/></Button></div></>}
       {page === 'help' && <Suspense fallback={<Spinner/>}><Guide language={language} busy={busy} onAction={act}/></Suspense>}
       {page === 'settings' && <section className="settings-section"><div className="setting-row"><span>{t('autostart')}</span><span className={view.admin?.autostart?.registered ? 'success' : 'warning-text'}>{t(view.admin?.autostart?.registered ? 'on' : 'off')}</span></div><div className="agent-control"><Button variant="secondary" isDisabled={busy} onPress={() => setConfirmStop(true)}><ShieldCheck size={17}/>{t('stopAgent')}</Button><p className="muted">{t('stopNotice')}</p></div>{confirmStop && <div className="actions stop-confirmation"><Button isDisabled={busy} onPress={() => {setConfirmStop(false); void act('stop-agent');}}><Square size={16}/>{t('stopAgent')}</Button><Button variant="ghost" onPress={() => setConfirmStop(false)}>{t('cancel')}</Button></div>}{view.message.startsWith('stop_') && <p role="status" className="notice warning">{t('stopCancelled')}</p>}{view.admin && !view.admin.force_kill_protected && <p className="protection-note muted">{t('perUserProtection')}</p>}</section>}
       {page === 'settings' && <><section className="settings-section"><h3>{t('scope')}</h3><p className="muted section-intro">{t('scopeNotice')}</p>{([['webTime', 'tracking'], ['clicks', 'interactions'], ['fields', 'field_values'], ['inventory', 'app_inventory']] as [Message, string][]).map(([label, flag]) => <div key={flag} className="setting-row"><span>{t(label)}</span><span className={view.policy?.[flag] ? 'success' : 'muted'}>{t(view.policy?.[flag] ? 'on' : 'off')}</span></div>)}</section><section className="settings-section"><h3>{t('domains')}</h3>{view.domains?.length ? <ul className="scope-list">{view.domains.map(domain => <li key={domain}><Globe2 size={15}/>{domain}</li>)}</ul> : <p className="muted">{t('empty')}</p>}<h3>{t('programs')}</h3>{view.programs?.length ? <ul className="scope-list">{view.programs.map(program => <li key={program}><Monitor size={15}/>{program}</li>)}</ul> : <p className="muted">{t('empty')}</p>}</section><Button variant="secondary" onPress={() => void act('retry')} isDisabled={busy}><RefreshCw size={17}/>{t('retry')}</Button></>}
       </main>
-    </ScrollShadow><footer className="status-footer"><span><RefreshCw size={14}/>{t('update')}<span className="dot-separator">·</span>{t(({active: 'installed', installed: 'installed', downloading: 'downloading', error: 'updateError', rolled_back: 'rollback', registration: 'waiting'} as Record<string, Message>)[view.update || ''] || 'checking')}</span><span>{view.version}</span></footer></div>
+    </ScrollShadow><footer className="status-footer">
+      <div className="update-status">
+        <div className="update-copy" role="status" aria-live="polite" aria-atomic="true" aria-busy={updates.busy}>
+          <p className="update-summary">{t('update')}<span className="dot-separator">·</span><span className={updates.failed ? 'danger' : undefined}>{t(updates.label)}</span></p>
+          {updates.checkedAt && <p className="update-checked">{t('updateCheckedAt')}: <time dateTime={new Date(updates.checkedAt * 1000).toISOString()}>{date(updates.checkedAt)}</time></p>}
+        </div>
+        <Tooltip delay={300}><Tooltip.Trigger className="update-action" role="presentation" tabIndex={-1}><Button isIconOnly size="sm" variant="ghost" aria-label={t('checkUpdate')} isPending={updates.busy} isDisabled={updates.disabled} onPress={() => void act('check-update')}><RefreshCw size={17} className={updates.busy ? 'spin' : undefined}/></Button></Tooltip.Trigger><Tooltip.Content>{t(updates.disabled ? updates.label : 'checkUpdate')}</Tooltip.Content></Tooltip>
+      </div><span className="app-version">{view.version}</span>
+    </footer></div>
   </div></div>;
 }
 createRoot(document.getElementById('root')!).render(<App/>);

@@ -79,11 +79,13 @@ ApplicationWindow {
             }
             ScrollView {
                 id: scroll
+                objectName: "pageScrollView"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
                 contentWidth: availableWidth
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                ScrollBar.vertical: ScrollBar { objectName: "pageScrollBar"; policy: ScrollBar.AsNeeded; visible: size < 1 }
                 ColumnLayout {
                     width: scroll.availableWidth
                     spacing: 0
@@ -128,12 +130,7 @@ ApplicationWindow {
                                     }
                                     Label { text: labels.last_confirmation + ": " + window.vm.confirmedAt; color: window.colors.muted; font.pixelSize: 12; Layout.fillWidth: true; wrapMode: Text.Wrap }
                                 }
-                                GridLayout {
-                                    Layout.fillWidth: true; Layout.leftMargin: 54; Layout.topMargin: 6; columnSpacing: 8; rowSpacing: 8
-                                    columns: width < 470 ? 1 : 2
-                                    ActionButton { objectName:"checkConnection"; text: window.vm.busy?labels.checking:labels.check_again; glyph: "RefreshCw"; primary: true; enabled: !window.vm.busy; onClicked: bridge.check(); Layout.fillWidth: true }
-                                    ActionButton { text: labels.open_dashboard; glyph: "ExternalLink"; quiet: true; enabled: window.vm.dashboardAvailable; onClicked: bridge.open("dashboard"); Layout.fillWidth: true }
-                                }
+                                ActionButton { objectName:"checkConnection"; text: window.vm.busy?labels.checking:labels.check_again; glyph: "RefreshCw"; primary: true; enabled: !window.vm.busy; onClicked: bridge.check(); Layout.fillWidth: true; Layout.leftMargin: 54; Layout.topMargin: 6 }
                             }
                         }
                     }
@@ -152,7 +149,7 @@ ApplicationWindow {
                         ActionButton { text: labels.connect_browsers; glyph: "Link"; primary: true; enabled: !window.vm.busy; onClicked: bridge.repair(); Layout.fillWidth: true }
                         ActionButton { text: labels.extension_folder; glyph: "FolderOpen"; onClicked: bridge.open("extension"); Layout.fillWidth: true }
                         Label { visible: window.vm.browserSetup.length > 0; text: labels.browser_setup; color: window.colors.text; font.pixelSize: 16; font.weight: Font.DemiBold; Layout.topMargin: 12; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                        BrowserLinks { Layout.fillWidth: true }
+                        BrowserLinks { showFeedback: true; Layout.fillWidth: true }
                     }
                     ColumnLayout {
                         visible: window.page === 2
@@ -176,7 +173,7 @@ ApplicationWindow {
                         ActionButton { objectName: "stopAgent"; text: labels.stop_agent; glyph: "Settings"; enabled: window.vm.canManage && !window.vm.busy; onClicked: bridge.requestStop(); Layout.fillWidth: true }
                     }
                     Guide { visible: window.page === 3; Layout.fillWidth: true; Layout.leftMargin: 28; Layout.rightMargin: 28; Layout.bottomMargin: 28 }
-                    Label { visible: window.page !== 3 && (window.vm.error !== "" || window.vm.message !== ""); text: window.vm.error || window.vm.message; color: window.colors.warning; font.pixelSize: 13; Layout.fillWidth: true; Layout.margins: 28; Layout.topMargin: 10; wrapMode: Text.Wrap }
+                    Label { visible: window.page !== 3 && (window.vm.error !== "" || (window.vm.message !== "" && (window.page !== 1 || window.vm.browserMessage === ""))); text: window.vm.error || window.vm.message; color: window.colors.warning; font.pixelSize: 13; Layout.fillWidth: true; Layout.margins: 28; Layout.topMargin: 10; wrapMode: Text.Wrap }
                     ColumnLayout {
                         visible: window.page !== 3
                         Layout.fillWidth: true; Layout.leftMargin: 28; Layout.rightMargin: 28; Layout.bottomMargin: 16; spacing: 8
@@ -188,8 +185,13 @@ ApplicationWindow {
             Rectangle { Layout.fillWidth: true; height: 1; color: window.colors.border }
             RowLayout {
                 Layout.fillWidth: true; Layout.leftMargin: 28; Layout.rightMargin: 28; Layout.topMargin: 14; Layout.bottomMargin: 14; spacing: 10
-                Image { source: "icons/RefreshCw-" + window.colors.icon + ".svg"; sourceSize.width: 16; sourceSize.height: 16; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
-                Label { text: labels.auto_update + " · " + window.vm.updateLabel; color: window.colors.muted; font.pixelSize: 12; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                Item {
+                    Layout.preferredWidth: 18; Layout.preferredHeight: 18
+                    Image { anchors.fill: parent; visible: !window.vm.updateBusy; source: "icons/RefreshCw-" + window.colors.icon + ".svg"; sourceSize.width: 18; sourceSize.height: 18 }
+                    BusyIndicator { objectName: "updateProgress"; anchors.fill: parent; running: window.vm.updateBusy; visible: running }
+                }
+                Label { objectName: "updateStatus"; text: labels.auto_update + " · " + window.vm.updateLabel; color: window.colors.muted; font.pixelSize: 12; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                ActionButton { objectName: "checkUpdates"; text: window.vm.updateBusy ? labels.checking : labels.check_updates; glyph: "RefreshCw"; hint: window.vm.updateCheckedAt ? labels.update_last_checked + ": " + window.vm.updateCheckedAt : ""; enabled: window.vm.canCheckUpdate; onClicked: bridge.checkUpdates(); Layout.preferredWidth: 190; Layout.minimumWidth: 190; Layout.maximumWidth: 190 }
                 Label { text: window.vm.version; color: window.colors.muted; font.pixelSize: 12 }
             }
         }

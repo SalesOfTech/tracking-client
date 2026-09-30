@@ -1,5 +1,12 @@
 import type {Language} from './locale';
 import {version as previewVersion} from '../package.json';
+export const browserPages = Object.freeze({
+  Chrome: 'chrome://extensions', Edge: 'edge://extensions', Yandex: 'browser://extensions',
+  Opera: 'opera://extensions', Brave: 'brave://extensions', Vivaldi: 'vivaldi://extensions',
+  Chromium: 'chrome://extensions', Firefox: 'about:addons',
+});
+export const browserPage = (family: string) => Object.hasOwn(browserPages, family) ? browserPages[family as keyof typeof browserPages] : undefined;
+export let previewClipboard = '';
 export type View = {
   mode: 'desktop' | 'installer'; language: Language; theme: 'system'; version: string; code: string;
   busy: boolean; error: string; errorText?: string; errorCode?: string; message: string; phase: string; enrolled: boolean;
@@ -7,9 +14,15 @@ export type View = {
   deliveryError?: boolean; receipt?: {hostname?: string; timestamp?: number; end_timestamp?: number; confirmed_at?: number};
   browsers?: {family: string; version: string; connected: boolean; error?: string; last_seen: number}[];
   domains?: string[]; programs?: string[]; policy?: Record<string, boolean>; update?: string;
+  updateCheckedAt?: number; updateAvailable?: boolean; updateChecking?: boolean;
   admin?: {admin_required: boolean; force_kill_protected: boolean; authorization?: {available: boolean; mechanism: string}; autostart?: {registered: boolean | null; effective: string}};
 };
-type Bridge = {nativeFrame: boolean; invoke: (action: string, input?: Record<string, unknown>) => Promise<View>; window: (action: string) => Promise<void>};
+export type CopyAcknowledgement = {copied: true};
+type Invoke = {
+  (action: 'copy-browser-page', input: Record<string, unknown>): Promise<CopyAcknowledgement>;
+  (action: string, input?: Record<string, unknown>): Promise<View>;
+};
+type Bridge = {nativeFrame: boolean; invoke: Invoke; window: (action: string) => Promise<void>};
 declare global {interface Window {tracking?: Bridge}}
 const params = new URLSearchParams(location.search);
 export const isPreview = !window.tracking && params.get('preview') === '1';
@@ -27,9 +40,13 @@ let preview: View = {
   browsers: [{family: 'Chrome', version: '3.2.0', connected: true, last_seen: now}],
   domains: ['demo.kommo.com', 'docs.google.com', 'mail.google.com'], programs: ['EXCEL.EXE', 'WINWORD.EXE'],
   policy: {tracking: true, interactions: true, field_values: true, app_inventory: true}, update: 'active',
+  updateAvailable: params.get('mode') !== 'installer' && params.get('enroll') !== '1' && params.get('updateAvailable') !== '0',
+  updateChecking: params.has('updateChecking') ? params.get('updateChecking') === '1' : params.get('update') === 'checking',
+  updateCheckedAt: params.get('updateCheckedAt') === 'none' ? undefined : now - 60,
   admin: {admin_required: true, force_kill_protected: false, autostart: {registered: true, effective: 'enabled'}},
 };
 if (!['ru', 'en', 'cs', 'uz'].includes(preview.language)) preview.language = 'en';
+if (['checking', 'active', 'installed', 'downloading', 'rolled_back', 'error', 'registration'].includes(params.get('update') || '')) preview.update = params.get('update')!;
 if (preview.mode === 'installer') {
   if (['waiting', 'detecting', 'migrating', 'installing', 'complete', 'failed'].includes(phase)) preview.phase = phase;
   preview.busy = ['detecting', 'migrating', 'installing'].includes(preview.phase);
@@ -48,9 +65,16 @@ if (preview.mode === 'installer') {
     case 'paused': preview.collection = 'paused_local'; break;
   }
 }
-export async function invoke(action: string, input: Record<string, unknown> = {}): Promise<View> {
+export function invoke(action: 'copy-browser-page', input: Record<string, unknown>): Promise<CopyAcknowledgement>;
+export function invoke(action: string, input?: Record<string, unknown>): Promise<View>;
+export async function invoke(action: string, input: Record<string, unknown> = {}): Promise<View | CopyAcknowledgement> {
   if (window.tracking) return window.tracking.invoke(action, input);
   if (!isPreview) throw Error('desktop_bridge_unavailable');
+  if (action === 'copy-browser-page') {
+    if (Object.keys(input).length !== 1 || typeof input.browser !== 'string' || !browserPage(input.browser)) throw Error('invalid_request');
+    previewClipboard = browserPage(input.browser)!;
+    return {copied: true};
+  }
   if (action === 'resume') {
     if (Object.keys(input).length || preview.mode !== 'desktop' || !preview.enrolled || preview.busy || preview.collection !== 'paused_local') throw Error('invalid_request');
     preview = {...preview, collection: 'recording'};
@@ -68,7 +92,13 @@ export async function invoke(action: string, input: Record<string, unknown> = {}
     preview = {...preview, busy: true, phase: 'installing'};
     setTimeout(() => {preview = {...preview, busy: false, phase: 'complete'};}, 2000);
   }
-  if (action === 'enroll') preview = {...preview, enrolled: true};
+  if (action === 'enroll') preview = {...preview, enrolled: true, updateAvailable: preview.mode === 'desktop' && params.get('updateAvailable') !== '0'};
+  if (action === 'check-update') {
+    if (Object.keys(input).length || preview.mode !== 'desktop' || !preview.enrolled || !preview.updateAvailable || preview.updateChecking || preview.update === 'downloading') throw Error('invalid_request');
+    preview = {...preview, updateChecking: true};
+    await new Promise(resolve => setTimeout(resolve, 350));
+    preview = {...preview, update: params.get('updateResult') === 'error' ? 'error' : 'active', updateChecking: false, updateCheckedAt: Date.now() / 1000};
+  }
   if (action === 'check') {
     preview = {...preview, busy: true};
     await new Promise(resolve => setTimeout(resolve, 350));

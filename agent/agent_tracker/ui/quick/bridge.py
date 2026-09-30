@@ -2,14 +2,14 @@ import re
 import threading
 import time
 from pathlib import Path
-from urllib.parse import urlencode
 
 from .qt import QObject, Property, Signal, Slot, QTimer, QUrl, QApplication, QDesktopServices
 from .labels import messages
 from ...admin_control import AdminControl
 from ...browser_health import connections, registration
-from ...browser_setup import BROWSER_FAMILIES, discover_browsers, open_extensions_page, register_host
+from ...browser_setup import BROWSER_FAMILIES, EXTENSION_PAGES, discover_browsers, register_host
 from ...core.files import read_json
+from ...core.update_control import update_status, request_check
 from ...i18n import LANGUAGES, client_language
 
 
@@ -29,6 +29,7 @@ class Bridge(QObject):
         self.language = client_language(client.state.get('language', ''), self.profile)
         self.busy = False
         self.message = ''
+        self.copied_browser = ''
         self.job = None
         self._view = {}
         self.completed.connect(self.finish)
@@ -49,8 +50,14 @@ class Bridge(QObject):
         browsers = connections(self.client)
         receipt = self.client.state.get('last_web_delivery', {})
         labels = messages(self.language)
-        update = read_json(self.install / 'update-status.json', {}) if self.install else {}
-        update_key = 'update_' + {'installed':'active', 'rolled_back':'rollback'}.get(update.get('state'), update.get('state', 'checking'))
+        update = update_status(self.install)
+        update_key = 'update_' + {'active':'current', 'installed':'active', 'rolled_back':'rollback'}.get(update['state'], update['state'])
+        message = labels.get(self.message, labels['connect_failed']) if self.message else ''
+        if self.message == 'browser_address_copied':
+            message = message.format(browser=self.copied_browser, address=EXTENSION_PAGES[self.copied_browser])
+        browser_setup = [dict(family=family, installed=False, signed_package_required=family == 'Firefox',
+                              support_level='signed_package_required' if family == 'Firefox' else 'manual_setup')
+                         for family in BROWSER_FAMILIES] if self.preview else discover_browsers()
         reason = status.get('collection_reason', 'unregistered')
         if reason == 'disabled_policy':
             reason = policy.get('tracking_disabled_reason') or reason
@@ -64,16 +71,17 @@ class Bridge(QObject):
             guide=self._guides.get(self.language) or self._guides.get('en') or
                   dict(intro=labels['guide_unavailable'], note='', sections=[]),
             admin=self.admin.status(), canManage=bool(self.worker) and not self.preview,
-            browserSetup=[dict(family=family, installed=False, signed_package_required=family == 'Firefox',
-                               support_level='signed_package_required' if family == 'Firefox' else 'manual_setup')
-                          for family in BROWSER_FAMILIES] if self.preview else discover_browsers(),
+            browserSetup=[dict(row, address=EXTENSION_PAGES[row['family']],
+                               instruction=labels['browser_paste_address'].format(browser=row['family']))
+                          for row in browser_setup if row.get('family') in EXTENSION_PAGES],
             languageIndex=list(LANGUAGES).index(self.language), version=status['version'],
             company=identity.get('company_name') or self.profile.get('company_name') or labels['company_installer'],
             employee=identity.get('user_name') or labels['not_connected'], enrolled=bool(identity),
             code=self.company_code, needsCode=not bool(self.company_code), busy=self.busy,
-            message=labels.get(self.message, labels['connect_failed']) if self.message else '',
-            browserMessage=labels.get(self.message, '') if self.message in
-                           ('checking', 'browser_page_opened', 'browser_not_found', 'browser_open_failed') else '',
+            message=message,
+            browserMessage=message if self.message in ('browser_address_copied', 'browser_copy_failed') else '',
+            copiedBrowser=self.copied_browser if self.message in ('browser_address_copied', 'browser_copy_failed') else '',
+            canCopyBrowser=not self.preview and not self.busy,
             browserReady=any(row['connected'] and not row.get('error') for row in browsers),
             browserName=next((row['family'] for row in browsers if row['connected']), ''),
             browsers=[dict(family=row['family'], version=row['version'], connected=row['connected'],
@@ -89,7 +97,10 @@ class Bridge(QObject):
                     [('web_time','tracking'),('clicks','interactions'),('fields','field_values'),('programs','app_inventory')]],
             domains=policy.get('domains', []),
             updateLabel=labels.get(update_key, labels['update_unknown']),
-            dashboardAvailable=any(re.fullmatch(r'[a-z0-9-]+\.(amocrm\.ru|kommo\.com)', host) for host in policy.get('domains', [])),
+            updateBusy=update['busy'], updateCheckedAt=time_label(update['checked_at']),
+            canCheckUpdate=bool(identity and self.install and (self.install / 'current.json').is_file()
+                                and not (self.install / 'uninstall-requested.json').exists()
+                                and not self.preview and not self.busy and not update['busy']),
         )
         if view != self._view:
             self._view = view
@@ -195,6 +206,20 @@ class Bridge(QObject):
         self.task(check)
 
     @Slot()
+    def checkUpdates(self):
+        if (self.preview or self.busy or not self.client.state.get('identity') or not self.install
+                or not (self.install / 'current.json').is_file()
+                or (self.install / 'uninstall-requested.json').exists()):
+            return
+        try:
+            if not update_status(self.install)['busy']:
+                request_check(self.install)
+                self.message = ''
+        except Exception:
+            self.message = 'update_request_failed'
+        self.refresh()
+
+    @Slot()
     def repair(self):
         def repair():
             if not self.install or self.preview:
@@ -210,15 +235,15 @@ class Bridge(QObject):
 
     @Slot(str)
     def openBrowser(self, family):
-        if self.preview or self.busy or family not in BROWSER_FAMILIES:
+        if self.preview or self.busy or family not in EXTENSION_PAGES:
             return
-        def open_page():
-            try:
-                result = open_extensions_page(family)
-            except Exception as error:
-                return 'browser_not_found' if str(error) == 'browser_not_found' else 'browser_open_failed'
-            return 'browser_page_opened' if result.get('opened') is True else 'browser_open_failed'
-        self.task(open_page)
+        self.copied_browser = family
+        try:
+            QApplication.clipboard().setText(EXTENSION_PAGES[family])
+            self.message = 'browser_address_copied'
+        except Exception:
+            self.message = 'browser_copy_failed'
+        self.refresh()
 
     @Slot()
     def retry(self):
@@ -231,14 +256,9 @@ class Bridge(QObject):
         if target == 'guide':
             self.guideRequested.emit()
             return
-        if target not in ('dashboard', 'extension'):
+        if target != 'extension':
             return
         extension = self.install / 'extension' if self.install else Path(__file__).resolve().parents[4] / 'extension'
-        if target == 'dashboard':
-            host = next((host for host in self.client.policy().get('domains', []) if re.fullmatch(r'[a-z0-9-]+\.(amocrm\.ru|kommo\.com)', host)), '')
-            if host:
-                QDesktopServices.openUrl(QUrl('https://' + host + '/dashboard/?' + urlencode({'period':'day'})))
-            return
         path = extension
         if path.exists():
             url = QUrl.fromLocalFile(str(path))

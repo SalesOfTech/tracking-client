@@ -6,7 +6,8 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from agent_tracker import supervisor
-from agent_tracker.core.files import read_json
+from agent_tracker.core.files import atomic_json, read_json
+from agent_tracker.core.update_control import request_check
 from agent_tracker.core.instance import SingleInstance
 from agent_tracker.bootstrap import app_path
 
@@ -22,6 +23,37 @@ def retained_320_launcher(root, call):
 
 
 class SupervisorTests(unittest.TestCase):
+    def test_manual_request_bypasses_hourly_interval_without_spawning_another_updater(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            atomic_json(root / 'current.json', {'version': '3.4.0'})
+            manager = Mock()
+            manager.active.return_value = {'version': '3.4.0'}
+            manager.check.return_value = None
+            manager.session.headers = {}
+            state = Mock()
+            state.get.return_value = {'device_secret': 'fixture'}
+            child = Mock(returncode=0)
+            child.poll.side_effect = [None, None, 0]
+            ticks = []
+            def tick(_):
+                ticks.append(True)
+                if len(ticks) == 2:
+                    self.assertTrue(request_check(root))
+            with patch.object(supervisor, 'ReleaseManager', return_value=manager), \
+                    patch.object(supervisor, 'ClientState', return_value=state), \
+                    patch.object(supervisor.subprocess, 'Popen', return_value=child) as spawn, \
+                    patch.object(supervisor.time, 'monotonic', return_value=100), \
+                    patch.object(supervisor.time, 'sleep', side_effect=tick):
+                self.assertEqual(0, supervisor.main(root, autostart=True))
+            self.assertEqual(manager.check.call_count, 2)
+            spawn.assert_called_once()
+            self.assertIn('--autostart', spawn.call_args.args[0])
+            result = read_json(root / 'update-status.json')
+            self.assertEqual(result['state'], 'active')
+            self.assertRegex(result['request_id'], '^[a-f0-9]{32}$')
+            self.assertFalse((root / 'update-request.json').exists())
+
     def test_retained_320_launcher_enters_current_payload_but_cannot_start_runtime(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / 'install'

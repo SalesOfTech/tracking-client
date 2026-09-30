@@ -21,7 +21,9 @@ test('content retains scroll shadows with a visible themed scrollbar', () => {
   const source = fs.readFileSync(path.join(__dirname, '../src/main.tsx'), 'utf8');
   const css = fs.readFileSync(path.join(__dirname, '../src/styles.css'), 'utf8');
   assert.ok(source.includes('hideScrollBar={false}'));
-  assert.ok(css.includes('scrollbar-gutter: stable'));
+  assert.ok(css.includes('scrollbar-gutter: auto'));
+  assert.match(css, /\.content-scroll \{[^}]*overflow-y: auto/);
+  assert.ok(!css.includes('scrollbar-gutter: stable'));
   assert.ok(css.includes('.content-scroll::-webkit-scrollbar-thumb'));
 });
 

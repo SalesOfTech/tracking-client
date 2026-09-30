@@ -12,13 +12,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 try:
     from agent_tracker.qt_desktop import Desktop, preview_state, appearance_colors
     from agent_tracker.ui.quick.bridge import Bridge
-    from agent_tracker.ui.quick.qt import QApplication, QObject, Qt
+    from agent_tracker.ui.quick.qt import QApplication, QObject, Qt, QTimer
     from agent_tracker.ui.quick.labels import EXTRA
     from agent_tracker.i18n import LANGUAGES
     QUICK_AVAILABLE = True
 except ImportError:
     QUICK_AVAILABLE = False
 from agent_tracker.core.client import Client
+from agent_tracker.core.files import atomic_json, read_json
+from agent_tracker.core.update_control import request_check
+from agent_tracker.browser_setup import EXTENSION_PAGES
 
 
 @unittest.skipUnless(QUICK_AVAILABLE, 'Qt dependencies are installed in native-build jobs')
@@ -154,32 +157,135 @@ class QuickActionTests(unittest.TestCase):
         request.assert_not_called()
         self.worker.switch_employee.assert_not_called()
 
-    def test_browser_setup_opens_only_known_families_in_background(self):
-        calls = []
-        def opened(family):
-            calls.append((family, threading.get_ident()))
-            return {'opened': True}
-        with patch('agent_tracker.ui.quick.bridge.open_extensions_page', side_effect=opened):
+    def test_browser_buttons_copy_only_fixed_addresses_without_launching(self):
+        self.app.clipboard().setText('unchanged')
+        with patch('agent_tracker.browser_setup.open_extensions_page') as opener, \
+                patch('agent_tracker.ui.quick.bridge.QDesktopServices.openUrl') as external:
             self.bridge.openBrowser('https://example.invalid')
-            self.assertEqual([], calls)
-            self.bridge.openBrowser('Yandex')
-            self.finish_job()
-        self.assertEqual('Yandex', calls[0][0])
-        self.assertNotEqual(threading.get_ident(), calls[0][1])
-        self.assertEqual('browser_page_opened', self.bridge.message)
-        self.bridge.preview = True
-        with patch('agent_tracker.ui.quick.bridge.open_extensions_page') as opener:
+            self.assertEqual('unchanged', self.app.clipboard().text())
+            for index, language in enumerate(LANGUAGES):
+                self.bridge.setLanguage(index)
+                for family, address in EXTENSION_PAGES.items():
+                    with self.subTest(language=language, family=family):
+                        self.bridge.openBrowser(family)
+                        self.assertEqual(address, self.app.clipboard().text())
+                        self.assertEqual('browser_address_copied', self.bridge.message)
+                        expected = self.bridge.view['labels']['browser_address_copied'].format(browser=family, address=address)
+                        self.assertEqual(expected, self.bridge.view['browserMessage'])
+                        self.assertEqual(expected, self.bridge.view['message'])
+                        self.assertIn('Enter', expected)
+                        self.assertIsNone(self.bridge.job)
+            opener.assert_not_called()
+            external.assert_not_called()
+        self.app.clipboard().setText('unchanged')
+        for mode in ('preview', 'busy'):
+            setattr(self.bridge, mode, True)
             self.bridge.openBrowser('Chrome')
-        opener.assert_not_called()
+            self.assertEqual('unchanged', self.app.clipboard().text())
+            setattr(self.bridge, mode, False)
 
-    def test_browser_launch_errors_are_localized_and_sanitized(self):
-        for error, expected in ((ValueError('browser_not_found'), 'browser_not_found'),
-                                (OSError('private executable path'), 'browser_open_failed')):
-            with patch('agent_tracker.ui.quick.bridge.open_extensions_page', side_effect=error):
+    def test_browser_clipboard_errors_are_localized_and_sanitized(self):
+        for index, language in enumerate(LANGUAGES):
+            self.bridge.setLanguage(index)
+            with patch('agent_tracker.ui.quick.bridge.QApplication.clipboard', side_effect=RuntimeError('private clipboard detail')):
                 self.bridge.openBrowser('Firefox')
-                self.finish_job()
-            self.assertEqual(expected, self.bridge.message)
-            self.assertEqual(self.bridge.view['labels'][expected], self.bridge.view['message'])
+            self.assertEqual('browser_copy_failed', self.bridge.message)
+            self.assertEqual(self.bridge.view['labels']['browser_copy_failed'], self.bridge.view['browserMessage'])
+            self.assertNotIn('private clipboard detail', self.bridge.view['message'])
+
+    def installed_root(self):
+        root = Path(self.temporary.name) / 'install'
+        root.mkdir()
+        atomic_json(root / 'current.json', {'version': '3.4.0'})
+        atomic_json(root / 'update-status.json', {'state': 'active', 'checked_at': int(time.time())})
+        self.bridge.install = root
+        self.bridge.refresh()
+        return root
+
+    def test_update_check_only_queues_one_local_supervisor_request(self):
+        root = self.installed_root()
+        self.assertTrue(self.bridge.view['canCheckUpdate'])
+        with patch('agent_tracker.ui.quick.bridge.request_check', wraps=request_check) as request, \
+                patch('requests.Session.request', side_effect=AssertionError('Qt must not check updates over the network')):
+            self.bridge.checkUpdates()
+            pending = read_json(root / 'update-request.json')
+            self.assertEqual({'id', 'requested_at'}, set(pending))
+            self.assertTrue(self.bridge.view['updateBusy'])
+            self.assertFalse(self.bridge.view['canCheckUpdate'])
+            self.bridge.checkUpdates()
+            request.assert_called_once_with(root)
+            self.assertEqual(pending, read_json(root / 'update-request.json'))
+        self.assertIsNone(self.bridge.job)
+        self.assertFalse(self.worker.sync_requested.is_set())
+        atomic_json(root / 'update-status.json', {'state': 'active', 'request_id': pending['id'], 'checked_at': int(time.time())})
+        self.bridge.refresh()
+        self.assertFalse(self.bridge.view['updateBusy'])
+        self.assertTrue(self.bridge.view['canCheckUpdate'])
+        self.assertEqual(self.bridge.view['labels']['update_current'], self.bridge.view['updateLabel'])
+        self.assertTrue(self.bridge.view['updateCheckedAt'])
+
+    def test_update_check_revalidates_enrollment_install_preview_and_busy(self):
+        root = self.installed_root()
+        identity = self.client.state.get('identity')
+        for guard in ('identity', 'install', 'current', 'preview', 'busy', 'checking', 'downloading', 'uninstall'):
+            with self.subTest(guard=guard):
+                self.client.state.set('identity', None if guard == 'identity' else identity)
+                self.bridge.install = None if guard == 'install' else root
+                self.bridge.preview = guard == 'preview'
+                self.bridge.busy = guard == 'busy'
+                if guard == 'current':
+                    (root / 'current.json').unlink()
+                else:
+                    atomic_json(root / 'current.json', {'version': '3.4.0'})
+                if guard == 'uninstall':
+                    (root / 'uninstall-requested.json').touch()
+                atomic_json(root / 'update-status.json', {'state': guard if guard in ('checking', 'downloading') else 'active', 'started_at': int(time.time())})
+                with patch('agent_tracker.ui.quick.bridge.request_check') as request:
+                    self.bridge.checkUpdates()
+                    self.bridge.refresh()
+                request.assert_not_called()
+                self.assertFalse(self.bridge.view['canCheckUpdate'])
+                self.assertFalse((root / 'update-request.json').exists())
+
+    def test_normal_runtime_readiness_environment_is_not_health_check_mode(self):
+        root = self.installed_root()
+        with patch.dict(os.environ, {'SOFT_TRACKING_HEALTH': str(root / 'runtime.ready')}):
+            self.bridge.checkUpdates()
+        self.assertTrue((root / 'update-request.json').is_file())
+
+    def test_update_request_race_and_error_feedback(self):
+        self.installed_root()
+        with patch('agent_tracker.ui.quick.bridge.request_check', return_value=False) as request, \
+                patch('agent_tracker.ui.quick.bridge.update_status', side_effect=[
+                    {'state': 'active', 'busy': False, 'checked_at': None},
+                    {'state': 'checking', 'busy': True, 'checked_at': None}]):
+            self.bridge.checkUpdates()
+        request.assert_called_once()
+        self.assertTrue(self.bridge.view['updateBusy'])
+        self.assertFalse(self.bridge.view['canCheckUpdate'])
+        self.assertEqual('', self.bridge.view['message'])
+        for index, language in enumerate(LANGUAGES):
+            self.bridge.setLanguage(index)
+            with patch('agent_tracker.ui.quick.bridge.request_check', side_effect=OSError('private install path')):
+                self.bridge.checkUpdates()
+            self.assertEqual(self.bridge.view['labels']['update_request_failed'], self.bridge.view['message'])
+            self.assertNotIn('private install path', self.bridge.view['message'])
+            self.assertFalse(self.bridge.view['updateBusy'])
+            self.assertTrue(self.bridge.view['canCheckUpdate'])
+
+    def test_update_states_are_localized_and_dashboard_is_removed(self):
+        root = self.installed_root()
+        for state, label in (('checking', 'checking'), ('active', 'current'), ('installed', 'active'),
+                             ('downloading', 'downloading'), ('rolled_back', 'rollback'), ('error', 'error'), ('registration', 'registration')):
+            atomic_json(root / 'update-status.json', {'state': state, 'started_at': int(time.time())})
+            for index in range(len(LANGUAGES)):
+                self.bridge.setLanguage(index)
+                self.assertEqual(self.bridge.view['labels']['update_' + label], self.bridge.view['updateLabel'])
+        self.assertNotIn('dashboardAvailable', self.bridge.view)
+        self.assertNotIn('open_dashboard', self.bridge.view['labels'])
+        with patch('agent_tracker.ui.quick.bridge.QDesktopServices.openUrl') as external:
+            self.bridge.open('dashboard')
+        external.assert_not_called()
 
 
 @unittest.skipUnless(QUICK_AVAILABLE, 'Qt dependencies are installed in native-build jobs')
@@ -197,32 +303,153 @@ class QuickLayoutTests(unittest.TestCase):
                 return found
         return None
 
-    def test_embedded_guide_browser_buttons_use_the_fixed_browser_api(self):
+    def settle(self):
+        for _ in range(4):
+            self.app.processEvents()
+            time.sleep(0.01)
+
+    def test_update_button_loading_disabled_and_localized_layout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'install'
+            root.mkdir()
+            atomic_json(root / 'current.json', {'version': '3.4.0'})
+            client = Client(Path(tmp))
+            preview_state(client, 'en')
+            desktop = Desktop(client, install=root, preview=True, headless=True)
+            try:
+                desktop.show()
+                desktop.bridge.preview = False
+                button = desktop.window.findChild(QObject, 'checkUpdates')
+                progress = desktop.window.findChild(QObject, 'updateProgress')
+                status = desktop.window.findChild(QObject, 'updateStatus')
+                self.assertIsNotNone(button)
+                for width, height in ((740, 580), (960, 720)):
+                    desktop.window.resize(width, height)
+                    for index, language in enumerate(LANGUAGES):
+                        desktop.bridge.setLanguage(index)
+                        for busy in (False, True):
+                            with self.subTest(width=width, language=language, busy=busy):
+                                atomic_json(root / 'update-status.json', {'state': 'downloading' if busy else 'active', 'checked_at': int(time.time())})
+                                desktop.bridge.refresh()
+                                self.settle()
+                                self.assertEqual(not busy, button.property('enabled'))
+                                self.assertEqual(busy, progress.property('running'))
+                                self.assertEqual(busy, progress.property('visible'))
+                                self.assertEqual(desktop.bridge.view['labels']['checking' if busy else 'check_updates'], button.property('text'))
+                                self.assertEqual(190, button.property('width'))
+                                self.assertLessEqual(status.property('contentWidth'), status.property('width') + 1)
+                                self.assertLessEqual(status.property('contentHeight'), status.property('height') + 1)
+                                self.assertLessEqual(status.property('x') + status.property('width'), button.property('x'))
+                                self.assertLessEqual(button.property('x') + button.property('width'), button.parentItem().property('width'))
+                atomic_json(root / 'update-status.json', {'state': 'active'})
+                desktop.bridge.refresh()
+                self.settle()
+                button.clicked.emit()
+                self.settle()
+                self.assertTrue((root / 'update-request.json').is_file())
+                self.assertFalse(button.property('enabled'))
+                self.assertTrue(progress.property('running'))
+            finally:
+                desktop.stop()
+                client.close()
+
+    def test_vertical_scrollbar_is_only_visible_for_overflow(self):
         with tempfile.TemporaryDirectory() as tmp:
             client = Client(Path(tmp))
             preview_state(client, 'en')
             desktop = Desktop(client, preview=True, headless=True)
             try:
-                browser_rows = [dict(family=family, installed=True, signed_package_required=family == 'Firefox',
+                desktop.show()
+                scrollbar = desktop.window.findChild(QObject, 'pageScrollBar')
+                self.assertIsNotNone(scrollbar)
+                for index, language in enumerate(LANGUAGES):
+                    desktop.bridge.setLanguage(index)
+                    desktop.window.resize(960, 1600)
+                    desktop.window.setProperty('page', 0)
+                    self.settle()
+                    self.assertGreaterEqual(scrollbar.property('size'), 1)
+                    self.assertFalse(scrollbar.property('visible'), language)
+                    desktop.window.resize(740, 580)
+                    desktop.window.setProperty('page', 3)
+                    self.settle()
+                    self.assertLess(scrollbar.property('size'), 1)
+                    self.assertTrue(scrollbar.property('visible'), language)
+            finally:
+                desktop.stop()
+                client.close()
+
+    def test_main_runtime_autostart_is_hidden_but_manual_launch_shows_window(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            client = Client(Path(tmp))
+            preview_state(client, 'en')
+            worker = Mock()
+            worker.is_alive.return_value = False
+            with patch('agent_tracker.qt_desktop.Worker', return_value=worker):
+                desktop = Desktop(client, preview=False, headless=True)
+            try:
+                self.assertFalse(desktop.window.isVisible())
+                with patch.dict(os.environ, {'SOFT_TRACKING_HEALTH': str(Path(tmp) / 'runtime.ready')}):
+                    QTimer.singleShot(30, desktop.app.quit)
+                    self.assertEqual(0, desktop.run(start_hidden=True))
+                    self.assertFalse(desktop.window.isVisible())
+                    self.assertEqual({'ready': True}, read_json(Path(tmp) / 'runtime.ready'))
+                    QTimer.singleShot(30, desktop.app.quit)
+                    self.assertEqual(0, desktop.run(start_hidden=False))
+                    self.assertTrue(desktop.window.isVisible())
+            finally:
+                desktop.stop()
+                client.close()
+
+    def test_browser_copy_buttons_work_in_pages_and_guide_without_detection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            client = Client(Path(tmp))
+            preview_state(client, 'en')
+            desktop = Desktop(client, preview=True, headless=True)
+            try:
+                browser_rows = [dict(family=family, installed=False, signed_package_required=family == 'Firefox',
                                      support_level='signed_package_required' if family == 'Firefox' else 'manual_setup')
                                 for family in ('Chrome', 'Edge', 'Yandex', 'Opera', 'Brave', 'Vivaldi', 'Chromium', 'Firefox')]
                 desktop.bridge.preview = False
+                desktop.show()
+                def browser_links(page):
+                    guide = desktop.window.findChild(QObject, 'embeddedGuide')
+                    return (self.find_visual_item(guide, 'guideSection_browsers') if page == 3 else
+                            self.find_visual_item(desktop.window.contentItem(), 'browserLinks'))
                 with patch('agent_tracker.ui.quick.bridge.discover_browsers', return_value=browser_rows):
                     desktop.bridge.refresh()
-                    desktop.window.setProperty('page', 3)
-                    self.app.processEvents()
-                    guide = desktop.window.findChild(QObject, 'embeddedGuide')
-                    section = self.find_visual_item(guide, 'guideSection_browsers')
-                    self.assertIsNotNone(section)
-                    for row in browser_rows:
-                        button = self.find_visual_item(section, 'openBrowser_' + row['family'])
-                        self.assertIsNotNone(button)
-                        self.assertTrue(button.property('enabled'))
-                        with patch('agent_tracker.ui.quick.bridge.open_extensions_page', return_value={'opened': True}) as opener:
-                            button.clicked.emit()
-                            desktop.bridge.job.join(timeout=5)
-                            self.app.processEvents()
-                        opener.assert_called_once_with(row['family'])
+                    for index, language in enumerate(LANGUAGES):
+                        desktop.bridge.setLanguage(index)
+                        for page in (1, 3):
+                            desktop.window.setProperty('page', page)
+                            self.settle()
+                            self.assertIsNotNone(browser_links(page))
+                            for row in browser_rows:
+                                family = row['family']
+                                with self.subTest(language=language, page=page, family=family):
+                                    section = browser_links(page)
+                                    button = self.find_visual_item(section, 'copyBrowser_' + family)
+                                    self.assertIsNotNone(button)
+                                    self.assertTrue(button.property('enabled'))
+                                    self.assertEqual('Copy', button.property('glyph'))
+                                    self.assertIn(desktop.bridge.view['labels']['browser_copy_address'], button.property('hint'))
+                                    address = self.find_visual_item(section, 'browserAddress_' + family)
+                                    instruction = self.find_visual_item(section, 'browserInstruction_' + family)
+                                    self.assertEqual(EXTENSION_PAGES[family], address.property('text'))
+                                    self.assertEqual(desktop.bridge.view['labels']['browser_paste_address'].format(browser=family), instruction.property('text'))
+                                    with patch('agent_tracker.browser_setup.open_extensions_page') as opener:
+                                        button.clicked.emit()
+                                        self.app.processEvents()
+                                    opener.assert_not_called()
+                                    self.assertEqual(EXTENSION_PAGES[family], self.app.clipboard().text())
+                                    feedback = self.find_visual_item(browser_links(page), 'browserFeedback_' + family)
+                                    self.assertTrue(feedback.property('visible'))
+                                    self.assertIn(EXTENSION_PAGES[family], feedback.property('text'))
+                    for mode in ('preview', 'busy'):
+                        setattr(desktop.bridge, mode, True)
+                        desktop.bridge.refresh()
+                        self.settle()
+                        self.assertFalse(self.find_visual_item(browser_links(3), 'copyBrowser_Chrome').property('enabled'))
+                        setattr(desktop.bridge, mode, False)
             finally:
                 desktop.stop()
                 client.close()

@@ -20,6 +20,7 @@ from .core.client import Client, company_code_from_filename, workspace
 from .core.files import atomic_json, read_json
 from .core.instance import SingleInstance
 from .core.release_manager import executable_name
+from .core.update_control import request_check, update_status
 from .electron_links import restore_links
 from .i18n import LANGUAGES, client_language, detect_language, translate
 from .runtime import Worker
@@ -43,7 +44,7 @@ def available():
 
 def validate(action, data):
     fields = {'status': (), 'enroll': ('code', 'key'), 'switch-employee': ('key',), 'stop-agent': (),
-              'browser-page': ('browser',), 'check': (), 'repair': (), 'retry': (), 'resume': (),
+              'browser-page': ('browser',), 'check': (), 'check-update': (), 'repair': (), 'retry': (), 'resume': (),
               'open': ('target',), 'preferences': ('language',), 'install': ('code',),
               'launch': (), 'ready': ()}
     if action not in fields or not isinstance(data, dict) or set(data) - set(fields[action]):
@@ -102,8 +103,7 @@ class Controller:
         reason = state.get('collection_reason', 'unregistered')
         if reason == 'disabled_policy':
             reason = policy.get('tracking_disabled_reason') or reason
-        update = read_json(self.install / 'update-status.json', {}) if self.install else {}
-        update_state = update.get('state', 'checking')
+        update = update_status(self.install)
         view.update(
             version=state['version'], enrolled=bool(identity), company=identity.get('company_name', ''),
             employee=identity.get('user_name', ''), collection=reason,
@@ -113,7 +113,9 @@ class Controller:
                       for row in connections(self.client)],
             domains=policy.get('domains', []), programs=policy.get('track_processes', []),
             policy={flag: bool(policy.get(flag)) for flag in ('tracking', 'interactions', 'field_values', 'app_inventory')},
-            update=update_state if update_state in ('active', 'installed', 'checking', 'registration', 'downloading', 'rolled_back', 'error') else 'checking',
+            update=update['state'], updateChecking=update['busy'], updateCheckedAt=update['checked_at'],
+            updateAvailable=bool(identity and self.install and (self.install / 'current.json').is_file()
+                                 and not (self.install / 'uninstall-requested.json').exists()),
             admin=self.admin.status(),
         )
         return view
@@ -241,6 +243,10 @@ class Controller:
                 else:
                     self.message = 'stop_' + result['state']
             self.task(stop_agent)
+        elif action == 'check-update' and self.client and self.install and not self.bundle:
+            if not self.client.state.get('identity'):
+                raise ValueError('invalid_request')
+            request_check(self.install)
         elif action == 'browser-page':
             from .browser_setup import open_extensions_page
             self.task(lambda: open_extensions_page(data['browser']))
@@ -347,7 +353,7 @@ def serve(controller, folder, hidden=False):
                 # Older supervisors retain the previous runtime's stop token during health checks.
                 stopping = stopping or bool(not controller.health and stop.get('token') and stop['token'] == os.environ.get('SOFT_TRACKING_RUN_TOKEN'))
                 show = controller.install / 'show-window.json'
-                if show.exists():
+                if not controller.health and show.exists():
                     show.unlink(missing_ok=True)
                     send({'event': 'show'})
             if stopping or controller.exit_requested:

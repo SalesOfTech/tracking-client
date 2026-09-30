@@ -5,6 +5,7 @@ const http = require('node:http');
 const path = require('node:path');
 const {chromium} = require('../../node_modules/playwright');
 const {verifyConnection, verifyInstallerMigration} = require('./connection.ui.cjs');
+const {verifyUpdates, verifyBrowserCopy} = require('./actions.ui.cjs');
 const root = path.resolve(__dirname, '../dist');
 
 (async () => {
@@ -25,6 +26,8 @@ const root = path.resolve(__dirname, '../dist');
     browser = await chromium.launch({headless: true, ignoreDefaultArgs: ['--hide-scrollbars']});
     await fs.mkdir(output, {recursive: true});
     await verifyConnection(browser, origin, output);
+    await verifyUpdates(browser, origin, output);
+    await verifyBrowserCopy(browser, origin, output);
     await verifyInstallerMigration(browser, origin, output);
     for (const language of ['ru','en','cs','uz']) {
       for (const theme of ['light','dark']) {
@@ -52,7 +55,8 @@ const root = path.resolve(__dirname, '../dist');
         await page.locator('.sidebar .help-button').click();
         await page.locator('.guide section').first().waitFor();
         assert.equal(await page.locator('.guide section').count(), 5);
-        await page.getByRole('button', {name: 'Chrome chrome://extensions', exact: true}).click();
+        await page.locator('.browser-pages button').first().click();
+        await page.locator('.browser-pages .copy-feedback').first().filter({hasText: /\S/}).waitFor();
         assert.equal(page.url().startsWith(origin), true);
         await page.screenshot({path: path.join(output, `electron-guide-${language}.png`)});
         await page.locator('.language-select button').click();

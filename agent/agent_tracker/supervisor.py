@@ -8,6 +8,7 @@ from pathlib import Path
 from .core.files import atomic_json, read_json
 from .core.release_manager import ReleaseManager, release_path, executable_name
 from .core.client import ClientState, workspace
+from .core.update_control import publish_status, take_request
 
 
 def main(root, autostart=False):
@@ -42,14 +43,16 @@ def main(root, autostart=False):
         if uninstall_marker.exists():
             # The uninstaller requests a graceful child stop and waits for our lock.
             continue
-        if time.monotonic() < next_check:
+        request_id = take_request(root)
+        if not request_id and time.monotonic() < next_check:
             continue
         next_check = time.monotonic() + 3600
         try:
+            publish_status(root, 'checking', request_id)
             state=ClientState(root.parent)
             try:
                 if not state.get('identity'):
-                    atomic_json(root/'update-status.json',{'state':'registration'})
+                    publish_status(root, 'registration', request_id)
                     next_check=time.monotonic()+60
                     continue
                 manager.session.headers['Authorization']='Bearer '+state.get('device')['device_secret']
@@ -61,9 +64,10 @@ def main(root, autostart=False):
                 active_version = manager.active()['version']
                 failed_version = failed.get('version')
                 unresolved = failed_version and Version(failed_version) > Version(active_version)
-                atomic_json(root / 'update-status.json', {'state':'rolled_back' if unresolved else 'active', 'version':active_version, 'failed_version':failed_version if unresolved else None, 'checked_at':int(time.time())})
+                publish_status(root, 'rolled_back' if unresolved else 'active', request_id,
+                               version=active_version, failed_version=failed_version if unresolved else None)
                 continue
-            atomic_json(root / "update-status.json", {"state":"downloading", "version":manifest["version"]})
+            publish_status(root, 'downloading', request_id, version=manifest['version'])
             archive = manager.download(manifest)
             staged = manager.stage(archive, manifest)
             archive.unlink()
@@ -87,20 +91,20 @@ def main(root, autostart=False):
                 time.sleep(0.2)
             if candidate.poll() is not None and candidate.returncode == 0 and new_health.is_file():
                 manager.confirm()
-                atomic_json(root / "update-status.json", {"state":"installed", "version":manifest["version"]})
+                publish_status(root, 'installed', request_id, version=manifest['version'])
             else:
                 # This is our short-lived self-test process, never a user's browser.
                 if candidate.poll() is None:
                     candidate.terminate()
                     candidate.wait(timeout=10)
                 manager.rollback()
-                atomic_json(root / "update-status.json", {"state":"rolled_back", "version":manifest["version"]})
+                publish_status(root, 'rolled_back', request_id, version=manifest['version'])
             (root / "stop-request.json").unlink(missing_ok=True)
             return 75
         except Exception as error:
             if child.poll() is not None:
                 manager.rollback()
                 return 75
-            atomic_json(root / "update-status.json", {"state":"error", "message":str(error)})
+            publish_status(root, 'error', request_id, message=str(error))
             next_check = time.monotonic() + 300
     return child.returncode

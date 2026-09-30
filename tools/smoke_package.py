@@ -100,6 +100,25 @@ def main(bundle):
             assert ready and launcher.poll() is None,'Installed launcher did not start the desktop'
             children = child_processes(launcher)
             assert_electron_child(children, app.parent, metadata)
+            if Version(version) >= Version('3.4.1'):
+                status_file = root / 'update-status.json'
+                deadline = time.monotonic() + 15
+                while time.monotonic() < deadline:
+                    status = json.loads(status_file.read_text()) if status_file.is_file() else {}
+                    if status.get('state') == 'registration':
+                        break
+                    time.sleep(0.2)
+                assert status.get('state') == 'registration', 'Frozen supervisor did not finish its first update check'
+                request_id = 'c' * 32
+                atomic_json(root / 'update-request.json', {'id': request_id, 'requested_at': int(time.time())})
+                deadline = time.monotonic() + 15
+                while time.monotonic() < deadline:
+                    status = json.loads(status_file.read_text())
+                    if status.get('request_id') == request_id and status.get('state') == 'registration':
+                        break
+                    time.sleep(0.2)
+                assert status.get('request_id') == request_id and status.get('state') == 'registration', 'Frozen supervisor ignored manual update request'
+                assert launcher.poll() is None, 'Manual update check stopped the installed application'
             enrollment=(root/'enrollment.json').read_bytes()
             reopened=install(Path(bundle),root,'b'*32,integrate=False,company_resolver=lambda code:32)
             assert reopened.samefile(root/executable_name(False,True)) and launcher.poll() is None
