@@ -13,7 +13,7 @@ from .core.files import read_json
 
 def run(bundle):
     with tempfile.TemporaryDirectory(prefix='soft-migration-smoke-') as temporary:
-        profile = Path(temporary)
+        profile = Path(temporary).resolve()
         root = profile / 'v3'
         metadata = dict(company_id=1, username='fixture', machine='fixture', os='windows', install_id='fixture')
 
@@ -68,7 +68,7 @@ def run(bundle):
 def run_automatic(bundle):
     from . import automatic_migration as automatic
     with tempfile.TemporaryDirectory(prefix='soft-automatic-migration-smoke-') as temporary:
-        root = Path(temporary) / 'v3'
+        root = Path(temporary).resolve() / 'v3'
         metadata = dict(company_id=1, username='fixture', machine='fixture', os='windows',
                         install_id='9e2d3d72-8594-4d1e-b7a7-99dbbe937d61')
         snapshot = dict(root=str(root), owner='fixture', metadata=metadata)
