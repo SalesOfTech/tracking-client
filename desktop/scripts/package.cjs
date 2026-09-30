@@ -13,7 +13,7 @@ const {packagePolicy} = require('./package-policy.cjs');
   await fs.cp(path.join(root, 'dist'), path.join(stage, 'dist'), {recursive: true});
   await fs.copyFile(path.join(root, '../extension/icons/icon128.png'), path.join(stage, 'brand.png'));
   await fs.writeFile(path.join(stage, 'package.json'), JSON.stringify({name: 'soft-tracking-ui', version: policy.version, main: 'main.cjs', author: 'SalesOfTech', license: 'UNLICENSED', ...policy.metadata}));
-  const packages = await packager({dir: stage, name: 'SoftTrackingUI', out: path.join(root, policy.output),
+  const packages = await packager({dir: stage, name: process.platform === 'darwin' ? 'SOFT Tracking' : 'SoftTrackingUI', out: path.join(root, policy.output),
     platform: process.platform, arch: process.arch, electronVersion: '44.3.0',
     asar: true, overwrite: true, prune: false, appBundleId: 'com.soft.tracking.ui',
     appVersion: policy.version, executableName: 'SoftTrackingUI',
@@ -23,13 +23,15 @@ const {packagePolicy} = require('./package-policy.cjs');
       win32metadata: {CompanyName: 'SalesOfTech', ProductName: 'SOFT Tracking', FileDescription: 'SOFT Tracking UI'}} : {}),
   });
   if (process.platform === 'darwin') {
-    for (const output of packages) {
+    for (let output of packages) {
+      // Keep the stable updater path, but package all helpers under the brand
+      // name: Electron resolves helper apps from CFBundleName on macOS.
+      await fs.rename(path.join(output, 'SOFT Tracking.app'), path.join(output, 'SoftTrackingUI.app'));
+      const stableOutput = path.join(root, policy.output, 'SoftTrackingUI-darwin-' + process.arch);
+      await fs.rename(output, stableOutput);
+      output = stableOutput;
       const contents = path.join(output, 'SoftTrackingUI.app', 'Contents');
-      // Packager overwrites extendInfo names with executableName; keep the
-      // updater's executable path while assigning the user-visible Dock name.
-      for (const key of ['CFBundleName', 'CFBundleDisplayName']) {
-        execFileSync('/usr/bin/plutil', ['-replace', key, '-string', 'SOFT Tracking', path.join(contents, 'Info.plist')]);
-      }
+      execFileSync('/usr/bin/plutil', ['-replace', 'CFBundleDisplayName', '-string', 'SOFT Tracking', path.join(contents, 'Info.plist')]);
       execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', path.dirname(contents)]);
       const info = JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', path.join(contents, 'Info.plist')], {encoding: 'utf8'}));
       const expectedIcon = await fs.readFile(path.join(root, '../agent/agent_tracker/assets/app_light.icns'));
