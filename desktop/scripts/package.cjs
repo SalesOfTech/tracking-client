@@ -25,6 +25,12 @@ const {packagePolicy} = require('./package-policy.cjs');
   if (process.platform === 'darwin') {
     for (const output of packages) {
       const contents = path.join(output, 'SoftTrackingUI.app', 'Contents');
+      // Packager overwrites extendInfo names with executableName; keep the
+      // updater's executable path while assigning the user-visible Dock name.
+      for (const key of ['CFBundleName', 'CFBundleDisplayName']) {
+        execFileSync('/usr/bin/plutil', ['-replace', key, '-string', 'SOFT Tracking', path.join(contents, 'Info.plist')]);
+      }
+      execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', path.dirname(contents)]);
       const info = JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', path.join(contents, 'Info.plist')], {encoding: 'utf8'}));
       const expectedIcon = await fs.readFile(path.join(root, '../agent/agent_tracker/assets/app_light.icns'));
       const actualIcon = await fs.readFile(path.join(contents, 'Resources', info.CFBundleIconFile));
