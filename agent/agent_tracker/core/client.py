@@ -276,6 +276,32 @@ class Client:
                 counts[key] += value
         return counts
 
+    def report_diagnostic(self, category, error=None):
+        """Queue bounded, credential-free support data with the original employee."""
+        if category not in ('connection', 'delivery', 'collector', 'activation', 'desktop', 'legacy_cleanup'):
+            raise ValueError('Invalid diagnostic category')
+        with self._lock, self.state.lock:
+            previous = self.state.get('diagnostic_' + category, {})
+            now = int(time.time())
+            if previous.get('epoch') == self.employee_epoch and now - previous.get('timestamp', 0) < 3600:
+                return previous['code']
+            identifier = uuid.uuid4().hex
+            code = 'ST-' + identifier[:12].upper()
+            # Exception text can contain URLs, keys and local paths. Never collect it.
+            name = type(error).__name__ if error is not None else 'Unknown'
+            if name not in ('Timeout', 'ConnectTimeout', 'ReadTimeout', 'ConnectionError', 'HTTPError',
+                            'PermissionError', 'OSError', 'ValueError', 'RuntimeError'):
+                name = 'Unknown'
+            response = getattr(error, 'response', None)
+            http_status = getattr(response, 'status_code', 0)
+            if type(http_status) is not int or not 100 <= http_status <= 599:
+                http_status = 0
+            self.outbox.push_payload({'event_id': identifier, 'type': 'diagnostic', 'timestamp': now,
+                'code': code, 'category': category, 'exception': name, 'http_status': http_status,
+                'version': application_version(), 'os': {'Windows': 'windows', 'Darwin': 'macos', 'Linux': 'linux'}.get(platform.system(), 'unknown')})
+            self.state.set('diagnostic_' + category, {'code': code, 'timestamp': now, 'epoch': self.employee_epoch})
+            return code
+
     def retry_rejected(self):
         for profile in self.profiles.delivery_profiles():
             self._queue(profile).retry_rejected()

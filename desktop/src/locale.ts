@@ -1,6 +1,8 @@
 export type Language = 'en' | 'ru' | 'cs' | 'uz';
 export const languages = {en: 'English', ru: 'Русский', cs: 'Čeština', uz: "O'zbekcha"};
 const rows = {
+  supportCode: ['Support error code', 'Код ошибки для поддержки', 'Kód chyby pro podporu', 'Yordam xizmati uchun xato kodi'],
+  connectionHealthy: ['Everything is connected and working', 'Всё подключено и работает', 'Vše je připojeno a funguje', 'Hammasi ulangan va ishlayapti'],
   check_server_ok: ['Server and browser connected. Session delivery is shown below.', 'Сервер и браузер подключены. Подтверждение отправки сессии показано ниже.', 'Server a prohlížeč jsou připojeny. Potvrzení doručení relace je uvedeno níže.', 'Server va brauzer ulangan. Sessiya yuborilishi tasdig‘i quyida ko‘rsatilgan.'],
   check_browser_missing: ['Server connected. The browser extension is not connected: open Browsers and follow the installation guide.', 'Связь с сервером есть. Расширение браузера не подключено: откройте «Браузеры» и следуйте инструкции.', 'Server je připojen. Rozšíření prohlížeče není připojeno: otevřete Prohlížeče a postupujte podle návodu.', 'Server ulangan. Brauzer kengaytmasi ulanmagan: Brauzerlar bo‘limidagi yo‘riqnomaga amal qiling.'],
   check_offline: ['Server check failed. Check your internet connection and retry; pending events are preserved.', 'Сервер недоступен. Проверьте интернет и повторите проверку; неотправленные события сохранены.', 'Server není dostupný. Zkontrolujte internet a zkuste znovu; neodeslané události jsou zachovány.', 'Serverga ulanib bo‘lmadi. Internetni tekshirib qayta urining; yuborilmagan hodisalar saqlanadi.'],

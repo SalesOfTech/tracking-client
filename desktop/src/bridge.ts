@@ -1,7 +1,7 @@
 import type {Language} from './locale';
 export type View = {
   mode: 'desktop' | 'installer'; language: Language; theme: 'system'; version: string; code: string;
-  busy: boolean; error: string; errorText?: string; message: string; phase: string; enrolled: boolean;
+  busy: boolean; error: string; errorText?: string; errorCode?: string; message: string; phase: string; enrolled: boolean;
   company?: string; employee?: string; collection?: string; pending?: number; rejected?: number;
   deliveryError?: boolean; receipt?: {hostname?: string; timestamp?: number; end_timestamp?: number; confirmed_at?: number};
   browsers?: {family: string; version: string; connected: boolean; error?: string; last_seen: number}[];

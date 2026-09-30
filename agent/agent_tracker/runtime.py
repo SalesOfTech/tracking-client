@@ -108,8 +108,12 @@ class Worker(threading.Thread):
             try:
                 self.client.refresh_config()
                 self.client.flush()
-            except Exception:
+            except Exception as error:
                 self.client.state.set('error', 'server_unavailable')
+                try:
+                    self.client.report_diagnostic('connection', error)
+                except Exception:
+                    pass
                 return 'check_offline'
             self.client.state.set('error', self._checkpoint_error or self.capability_error)
             return 'check_server_ok'
@@ -170,8 +174,17 @@ class Worker(threading.Thread):
                 if attempted:
                     failures = 0
                     self.client.state.set('error', tracking_error or self.capability_error)
-            except Exception:
+            except Exception as error:
                 failures = min(failures + 1, 8)
                 next_flush = next_config = time.time() + min(300, 2 ** failures + random.random() * 5)
                 self.client.state.set('error', 'server_unavailable')
+                try:
+                    self.client.report_diagnostic('delivery', error)
+                except Exception:
+                    pass
+            if tracking_error or self.capability_error:
+                try:
+                    self.client.report_diagnostic('collector')
+                except Exception:
+                    pass
             return next_config, next_flush, failures

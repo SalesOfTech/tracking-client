@@ -72,6 +72,7 @@ class Controller:
         self.language = client_language(client.state.get('language', ''), profile) if client else detect_language()
         self.theme = 'system'
         self.busy, self.error, self.message = False, '', ''
+        self.error_code = ''
         self.job, self.launcher = None, None
         self.phase = 'waiting'
         self.health, self.ready, self.exit_requested = health, False, False
@@ -85,11 +86,16 @@ class Controller:
         except KeyError:
             error_text = translate(self.language, 'connect_failed')
         view = dict(mode=self.mode, language=self.language, theme=self.theme, code=self.code,
-                    busy=self.busy, error=error, errorText=error_text, message=self.message, phase=self.phase)
+                    busy=self.busy, error=error, errorText=error_text, errorCode=self.error_code, message=self.message, phase=self.phase)
         if not self.client:
             view.update(version=read_json(self.bundle / 'setup-build.json', {}).get('version', ''), enrolled=False)
             return view
         state = self.client.status()
+        if state.get('error') and not error:
+            try:
+                view['errorCode'] = self.client.report_diagnostic('delivery')
+            except Exception:
+                view['errorCode'] = 'ST-LOCAL'
         identity, policy = state['identity'] or {}, state['policy']
         receipt = self.client.state.get('last_web_delivery', {})
         reason = state.get('collection_reason', 'unregistered')
@@ -115,6 +121,7 @@ class Controller:
         if self.busy or self.health:
             raise ValueError('busy')
         self.busy, self.error, self.message = True, '', ''
+        self.error_code = ''
         def run():
             try:
                 operation()
@@ -124,6 +131,11 @@ class Controller:
                            'setup_existing_damaged', 'setup_upgrade_failed', 'setup_wrong_target', 'setup_close_required',
                            'employee_switch_not_ready', 'employee_switch_pending_activity', 'stop_pending_activity', 'browser_not_found', 'browser_open_failed'}
                 self.error = str(error) if str(error) in allowed else 'setup_failed' if self.bundle else 'connect_failed'
+                if self.client:
+                    try:
+                        self.error_code = self.client.report_diagnostic('desktop', error)
+                    except Exception:
+                        self.error_code = 'ST-LOCAL'
                 if self.bundle:
                     self.phase = 'failed'
             finally:

@@ -61,7 +61,7 @@ function App() {
     <Select.Popover><ListBox>{Object.entries(languages).map(([id, name]) => <ListBox.Item key={id} id={id} textValue={name}><Label>{name}</Label><ListBox.ItemIndicator/></ListBox.Item>)}</ListBox></Select.Popover>
   </Select>;
   const actionErrors: Record<string, Message> = {employee_switch_not_ready: 'switchBlocked', employee_switch_pending_activity: 'switchPending', stop_pending_activity: 'stopPending', browser_not_found: 'browserMissing', browser_open_failed: 'browserMissing'};
-  const error = (failed || localError || view?.error) && <div className="notice error" role="alert"><AlertCircle size={18}/><span>{view?.error && actionErrors[view.error] ? t(actionErrors[view.error]) : view?.errorText || t('genericError')}</span></div>;
+  const error = (failed || localError || view?.error || view?.errorCode) && <div className="notice error" role="alert"><AlertCircle size={18}/><span>{view?.errorCode ? `${t('supportCode')}: ${view.errorCode}` : view?.error && actionErrors[view.error] ? t(actionErrors[view.error]) : view?.errorText || t('genericError')}</span></div>;
   const titlebar = !nativeFrame && <header className="titlebar"><span><img src={brand} alt=""/>SOFT Tracking</span><div>{isPreview && <small>{t('preview')}</small>}{iconButton(t('minimize'), <Minus size={16}/>, () => void window.tracking?.window('minimize'))}{iconButton(t('close'), <X size={16}/>, () => void window.tracking?.window('close'))}</div></header>;
 
   if (!view) return <div className="app-shell">{titlebar}<main className="loading"><Spinner/><p>{failed ? t('genericError') : t('loading')}</p></main></div>;
@@ -86,8 +86,8 @@ function App() {
   const recent = Boolean(receipt.end_timestamp && Date.now()/1000 - receipt.end_timestamp < 180);
   const browserReady = browsers.some(row => row.connected && !row.error);
   const recording = view.collection === 'recording';
-  const healthy = recording && recent && browserReady && !view.deliveryError;
-  const statusText: Message = healthy ? 'active' : !recording ? 'stopped' : !browserReady ? 'needsAttention' : !receipt.hostname ? 'awaitingSession' : 'oldReceipt';
+  const healthy = recording && recent && browserReady && !view.deliveryError && !view.error && !view.errorCode && !view.rejected;
+  const statusText: Message = healthy ? 'connectionHealthy' : !recording ? 'stopped' : !browserReady ? 'needsAttention' : !receipt.hostname ? 'awaitingSession' : 'oldReceipt';
   return <div className="app-shell">{titlebar}<div className="workspace">
     <aside className="sidebar"><div className="brand"><img src={brand} alt=""/><strong>SOFT<br/>Tracking</strong></div>
       <nav>{([['connection', Link], ['browsers', Globe2], ['settings', Settings2]] as const).map(([id, Icon]) => <Button key={id} variant="ghost" aria-current={page === id ? 'page' : undefined} onPress={() => setPage(id)}><Icon size={19}/><span>{t(id)}</span></Button>)}</nav>
@@ -96,7 +96,7 @@ function App() {
     <div className="content-column"><header className="page-header"><h1>{t(page as Message)}</h1><div className="header-controls">{languageControl}</div></header>
     <ScrollShadow className="content-scroll" hideScrollBar>
       <main className="page-content">{error}
-      {view.message && ['check_server_ok', 'check_browser_missing', 'check_offline', 'check_pending', 'legacy_cleanup_warning'].includes(view.message) && <div className="notice" role="status"><AlertCircle size={18}/><span>{t(view.message as Message)}</span></div>}
+      {view.message && ['check_server_ok', 'check_browser_missing', 'check_pending', 'legacy_cleanup_warning'].includes(view.message) && <div className="notice" role="status"><AlertCircle size={18}/><span>{t(view.message as Message)}</span></div>}
       {page === 'connection' && (!view.enrolled ? <div className="activation"><div className="activation-icon"><Link size={26}/></div><h2>{t('enterCode')}</h2><p className="muted">{t('activationInfo')}</p>
         {view.company && <div className="company-line"><Building2 size={18}/>{view.company}</div>}
         <form onSubmit={event => {event.preventDefault(); void act('enroll', {code: view.code || code, key: key.trim()});}}>
@@ -114,7 +114,6 @@ function App() {
         {switching && <form className="employee-switch" onSubmit={event => {event.preventDefault(); void act('switch-employee', {key: key.trim()});}}><h3>{t('switchEmployee')}</h3><p className="muted">{t('switchNotice')}</p><TextField value={key} onChange={setKey} isRequired><Label>{t('employeeKey')}</Label><Input autoFocus autoComplete="off" spellCheck={false}/></TextField><div className="actions"><Button type="submit" isDisabled={busy || !/^[a-f0-9]{64}$/.test(key.trim())}><UserRoundPen size={16}/>{t('switchEmployee')}</Button><Button variant="ghost" isDisabled={busy} onPress={() => {setSwitching(false); setKey('');}}>{t('cancel')}</Button></div></form>}
         <section className="receipt-section"><h3>{t('confirmed')}</h3>{receipt.hostname ? <><div className="receipt-title"><Globe2 size={18}/><strong>{receipt.hostname}</strong><span>{Math.max(0, Math.round((receipt.end_timestamp || 0)-(receipt.timestamp || 0)))} {t('seconds')}</span></div><p className="muted time-range">{date(receipt.timestamp)} <ArrowRight size={13}/> {date(receipt.end_timestamp)}</p><div className="delivery-line"><ShieldCheck size={16}/><span>{t('delivered')}</span><time>{date(receipt.confirmed_at)}</time></div></> : <p className="empty-state">{t('awaitingSession')}</p>}</section>
         <div className="queue-row"><span><Clock3 size={17}/>{t('pending')}<strong>{view.pending}</strong></span><span><AlertCircle size={17}/>{t('rejected')}<strong>{view.rejected}</strong></span></div>
-        {view.deliveryError && <div className="notice warning"><AlertCircle size={18}/><p>{t('offline')}</p></div>}
         <div className="actions">{view.collection === 'paused_local' && <Button onPress={() => void act('resume')} isDisabled={busy}><Play size={17}/>{t('resume')}</Button>}<Button onPress={() => void act('check')} isDisabled={busy}><RefreshCw size={17}/>{t('check')}</Button><Button variant="ghost" isDisabled={!(view.domains || []).some(domain => /\.(kommo\.com|amocrm\.ru)$/.test(domain))} onPress={() => void act('open', {target: 'dashboard'})}>{t('dashboard')}<ExternalLink size={16}/></Button></div>
         {['employee_changed', 'connected'].includes(view.message) && <p className="action-message" role="status">{t(view.message === 'employee_changed' ? 'employeeChanged' : 'connected')}</p>}
       </>)}
