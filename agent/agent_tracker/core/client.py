@@ -91,8 +91,8 @@ class Client:
         """The returned queue stays bound to its employee, even after switching."""
         return self._queue(self.profiles.active())
 
-    def _queue(self, profile):
-        epoch = profile["epoch"]
+    def _queue(self, profile, diagnostic=False):
+        epoch = profile["epoch"] + ('.diagnostics' if diagnostic else '')
         with self._lock:
             if epoch not in self._outboxes:
                 legacy = self.state.get("legacy_employee_epoch")
@@ -234,6 +234,11 @@ class Client:
             try:
                 with self._lock:
                     delivered += self._flush_profile(profile)
+                    try:
+                        self._flush_profile(profile, diagnostic=True)
+                    except Exception:
+                        # Support uploads must not block employee activity or switching.
+                        pass
             except Exception as error:
                 # One revoked or offline employee must not starve other profiles.
                 if failure is None:
@@ -242,8 +247,8 @@ class Client:
             raise failure
         return delivered
 
-    def _flush_profile(self, profile):
-        outbox = self._queue(profile)
+    def _flush_profile(self, profile, diagnostic=False):
+        outbox = self._queue(profile, diagnostic=diagnostic)
         events = outbox.batch()
         if not events or not profile["identity"]:
             return 0
@@ -252,7 +257,7 @@ class Client:
         outbox.acknowledge(ids)
         for event_id, code in rejected.items():
             outbox.mark_rejected(event_id, code)
-        if ids:
+        if ids and not diagnostic:
             values = {'last_delivery_at': int(time.time())}
             confirmed = set(ids)
             sessions = [event for event in events if event['event_id'] in confirmed and event.get('type') == 'web_session']
@@ -296,7 +301,7 @@ class Client:
             http_status = getattr(response, 'status_code', 0)
             if type(http_status) is not int or not 100 <= http_status <= 599:
                 http_status = 0
-            self.outbox.push_payload({'event_id': identifier, 'type': 'diagnostic', 'timestamp': now,
+            self._queue(self.profiles.active(), diagnostic=True).push_payload({'event_id': identifier, 'type': 'diagnostic', 'timestamp': now,
                 'code': code, 'category': category, 'exception': name, 'http_status': http_status,
                 'version': application_version(), 'os': {'Windows': 'windows', 'Darwin': 'macos', 'Linux': 'linux'}.get(platform.system(), 'unknown')})
             self.state.set('diagnostic_' + category, {'code': code, 'timestamp': now, 'epoch': self.employee_epoch})
