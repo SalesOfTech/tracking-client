@@ -359,6 +359,19 @@ def stage_candidate(path, destination, row, plan):
         expected.add(prefix + 'desktop-package-lock.json')
     with zipfile.ZipFile(path) as archive:
         entries = archive.infolist()
+        require(sum(info.file_size for info in entries) <= MAX_BUNDLE)
+        if prefix + 'migration.json' in archive.namelist():
+            require(build['os'] == 'windows')
+            migration = bounded_member(archive, prefix + 'migration.json')
+            filename = 'SOFT-Tracking-Migrate-' + VERSION + '.exe'
+            require(migration.get('file') == filename and migration.get('version') == VERSION
+                    and migration.get('target') == row['target'])
+            expected.update({prefix + 'migration.json', prefix + filename})
+            checksum = hashlib.sha256()
+            with archive.open(prefix + filename) as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                    checksum.update(chunk)
+            require(checksum.hexdigest() == sha(migration.get('sha256')))
         require(len(entries) == len(expected) and {info.filename for info in entries} == expected)
         require(sum(info.file_size for info in entries) <= MAX_BUNDLE)
         require(all(not stat.S_ISLNK(info.external_attr >> 16) and not info.flag_bits & 1

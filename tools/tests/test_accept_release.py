@@ -419,6 +419,19 @@ class GateTests(unittest.TestCase):
         self.assertEqual((self.root / 'staged/release-3.2.0.zip').read_bytes(),
                          (self.root / 'staged/setup-payload/release.zip').read_bytes())
 
+    def test_candidate_migrator_metadata_and_bytes_are_verified(self):
+        def add(files, bad=False):
+            files['SOFT-Tracking-Migrate-3.2.0.exe'] = b'fixture migrator'
+            files['migration.json'] = json.dumps({
+                'file': 'SOFT-Tracking-Migrate-3.2.0.exe', 'version': '3.2.0',
+                'target': gate.TARGETS[0]['target'],
+                'sha256': hashlib.sha256(b'wrong' if bad else b'fixture migrator').hexdigest()})
+        path, row = self.signed_bundle(add)
+        gate.stage_candidate(path, self.root / 'migration-valid', row, self.plan)
+        path, row = self.signed_bundle(lambda files: add(files, True))
+        with self.assertRaises(ValueError):
+            gate.stage_candidate(path, self.root / 'migration-invalid', row, self.plan)
+
     def test_candidate_tamper_untrusted_keys_and_provenance_mismatch_fail(self):
         mutations = [lambda files: files.update({'SOFT-Tracking-Setup-3.2.0.exe': b'changed'}),
                      lambda files: files.update({'release-3.2.0.zip': b'changed'}),
