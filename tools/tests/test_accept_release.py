@@ -349,6 +349,26 @@ class GateTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 gate.accepted_jobs(api, self.plan)
 
+    def test_incomplete_job_list_needs_exact_successful_job_detail(self):
+        api = Mock()
+        rows = [{'id': i + 1, 'name': 'accept-' + row['target'], 'status': 'completed', 'conclusion': 'success',
+                 'steps': [{'name': gate.SMOKE_STEP, 'conclusion': 'success'}]} for i, row in enumerate(gate.TARGETS)]
+        detail = dict(copy.deepcopy(rows[0]), run_id=self.plan['acceptance_run_id'])
+        rows[0]['steps'][0]['conclusion'] = None
+        api.jobs.return_value = rows
+        api.api.return_value = detail
+        gate.accepted_jobs(api, self.plan)
+        api.api.assert_called_once_with('actions/jobs/1')
+        for change in ('failure', 'wrong_run'):
+            bad = copy.deepcopy(detail)
+            if change == 'failure':
+                bad['steps'][0]['conclusion'] = 'failure'
+            else:
+                bad['run_id'] += 1
+            api.api.return_value = bad
+            with self.assertRaises(ValueError):
+                gate.accepted_jobs(api, self.plan)
+
     def test_smoke_diagnostics_emit_only_fixed_stage_and_keep_failure_closed(self):
         gate.private_root().mkdir()
         cases = (

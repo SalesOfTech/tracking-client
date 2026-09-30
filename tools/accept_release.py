@@ -512,6 +512,18 @@ def accepted_jobs(api, plan):
     require(all(job['status'] == 'completed' and job['conclusion'] == 'success' for job in native))
     for job in native:
         steps = [step for step in job.get('steps', []) if step['name'] == SMOKE_STEP]
+        if len(steps) == 1 and steps[0].get('conclusion') is None:
+            require(type(job.get('id')) is int and job['id'] > 0)
+            for retry in range(3):
+                detail = api.api('actions/jobs/' + str(job['id']))
+                require(detail.get('id') == job['id'] and detail.get('name') == job['name']
+                        and detail.get('run_id') == plan['acceptance_run_id']
+                        and detail.get('status') == 'completed' and detail.get('conclusion') == 'success')
+                steps = [step for step in detail.get('steps', []) if step['name'] == SMOKE_STEP]
+                if len(steps) != 1 or steps[0].get('conclusion') is not None:
+                    break
+                if retry < 2:
+                    time.sleep(5)
         require(len(steps) == 1 and steps[0].get('conclusion') == 'success')
 
 
