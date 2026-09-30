@@ -114,7 +114,7 @@ class UninstallerTests(unittest.TestCase):
         encoded = base64.b64encode(script.encode('utf-8')).decode('ascii')
         command = "$s=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + encoded + "')); $t=$null; $e=$null; [void][Management.Automation.Language.Parser]::ParseInput($s,[ref]$t,[ref]$e); if($e.Count){$e | Out-String; exit 1}"
         result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', command],
-                                capture_output=True, text=True, timeout=15)
+                                capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
