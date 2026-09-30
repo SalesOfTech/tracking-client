@@ -94,7 +94,7 @@ function App() {
       <Button className="help-button" variant="ghost" aria-current={page === 'help' ? 'page' : undefined} onPress={() => setPage('help')}><CircleHelp size={18}/><span>{t('help')}</span></Button>
     </aside>
     <div className="content-column"><header className="page-header"><h1>{t(page as Message)}</h1><div className="header-controls">{languageControl}</div></header>
-    <ScrollShadow className="content-scroll" hideScrollBar>
+    <ScrollShadow className="content-scroll" hideScrollBar={false}>
       <main className="page-content">{error}
       {view.message && ['check_server_ok', 'check_browser_missing', 'check_pending', 'legacy_cleanup_warning'].includes(view.message) && <div className="notice" role="status"><AlertCircle size={18}/><span>{t(view.message as Message)}</span></div>}
       {page === 'connection' && (!view.enrolled ? <div className="activation"><div className="activation-icon"><Link size={26}/></div><h2>{t('enterCode')}</h2><p className="muted">{t('activationInfo')}</p>

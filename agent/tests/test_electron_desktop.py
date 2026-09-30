@@ -12,6 +12,22 @@ from agent_tracker.electron_desktop import Controller, serve, validate
 
 
 class ElectronControllerTests(unittest.TestCase):
+    def test_old_supervisor_stop_token_does_not_stop_health_check(self):
+        class Pipe(io.BytesIO):
+            def close(self):
+                pass
+        for health in (False, True):
+            with self.subTest(health=health), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / 'stop-request.json').write_text('{"token":"old-runtime"}')
+                child = Mock(returncode=0)
+                child.stdin, child.stdout = Pipe(), io.BytesIO()
+                child.poll.side_effect = [None, 0]
+                controller = Mock(install=root, health=health, ready=True, exit_requested=False, worker=None, busy=False, mode='desktop')
+                with patch('agent_tracker.electron_desktop.restore_links'), patch('agent_tracker.electron_desktop.electron_path', return_value=Mock(is_file=lambda: True)), patch('agent_tracker.electron_desktop.subprocess.Popen', return_value=child), patch.dict('os.environ', SOFT_TRACKING_RUN_TOKEN='old-runtime'):
+                    self.assertEqual(0, serve(controller, root))
+                self.assertEqual(not health, b'"shutdown"' in child.stdin.getvalue())
+
     def test_successful_enrollment_is_not_failed_by_legacy_cleanup(self):
         with tempfile.TemporaryDirectory() as directory:
             client = Client(Path(directory))

@@ -56,7 +56,8 @@ def main(root, autostart=False):
                 state.close()
             manifest = manager.check()
             if not manifest:
-                atomic_json(root / 'update-status.json', {'state':'active', 'version':manager.active()['version'], 'checked_at':int(time.time())})
+                failed = read_json(root / 'failed.json', {})
+                atomic_json(root / 'update-status.json', {'state':'rolled_back' if failed.get('version') else 'active', 'version':manager.active()['version'], 'failed_version':failed.get('version'), 'checked_at':int(time.time())})
                 continue
             atomic_json(root / "update-status.json", {"state":"downloading", "version":manifest["version"]})
             archive = manager.download(manifest)
@@ -69,6 +70,7 @@ def main(root, autostart=False):
                 (root / "stop-request.json").unlink(missing_ok=True)
                 raise ValueError("Update postponed: application is still saving activity")
             manager.activate(staged)
+            (root / 'stop-request.json').unlink(missing_ok=True)
             new_health = run / (uuid.uuid4().hex + ".ready")
             env["SOFT_TRACKING_HEALTH"] = str(new_health)
             newer = release_path(root, manifest["version"]) / "app" / executable_name()

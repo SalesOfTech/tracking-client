@@ -20,7 +20,7 @@ const {packagePolicy} = require('./package-policy.cjs');
     ...(process.platform === 'darwin' ? {icon: path.join(root, '../agent/agent_tracker/assets/app_light.icns'),
       extendInfo: {CFBundleName: 'SOFT Tracking', CFBundleDisplayName: 'SOFT Tracking'}} : {}),
     ...(process.platform === 'win32' ? {icon: path.join(root, '../agent/agent_tracker/assets/app.ico'),
-      win32metadata: {CompanyName: 'SalesOfTech', ProductName: 'SOFT Tracking', FileDescription: 'SOFT Tracking UI'}} : {}),
+      win32metadata: {CompanyName: 'SalesOfTech', ProductName: 'SOFT Tracking', FileDescription: 'SOFT Tracking'}} : {}),
   });
   if (process.platform === 'darwin') {
     for (let output of packages) {

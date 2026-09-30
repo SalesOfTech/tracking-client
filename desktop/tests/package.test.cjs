@@ -13,6 +13,16 @@ test('packaging uses the installed dependency named packager export', () => {
   assert.match(source, /const\s*\{\s*packager\s*\}\s*=\s*require\(['"]@electron\/packager['"]\)/);
   assert.match(source, /author:\s*'SalesOfTech'/);
   assert.match(source, /win32metadata:\s*\{CompanyName:\s*'SalesOfTech'/);
+  assert.match(source, /FileDescription: 'SOFT Tracking'/);
+  assert.doesNotMatch(source, /FileDescription: 'SOFT Tracking UI'/);
+});
+
+test('content retains scroll shadows with a visible themed scrollbar', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/main.tsx'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '../src/styles.css'), 'utf8');
+  assert.ok(source.includes('hideScrollBar={false}'));
+  assert.ok(css.includes('scrollbar-gutter: stable'));
+  assert.ok(css.includes('.content-scroll::-webkit-scrollbar-thumb'));
 });
 
 const localHost = {argv: ['--local-test'], env: {RELEASE_VERSION: '3.2.0-rc.1'},

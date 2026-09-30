@@ -329,7 +329,8 @@ def serve(controller, folder, hidden=False):
                 raise RuntimeError('Desktop interface startup or health check timed out')
             if controller.install:
                 stop = read_json(controller.install / 'stop-request.json', {})
-                stopping = stopping or bool(stop.get('token') and stop['token'] == os.environ.get('SOFT_TRACKING_RUN_TOKEN'))
+                # Older supervisors retain the previous runtime's stop token during health checks.
+                stopping = stopping or bool(not controller.health and stop.get('token') and stop['token'] == os.environ.get('SOFT_TRACKING_RUN_TOKEN'))
                 show = controller.install / 'show-window.json'
                 if show.exists():
                     show.unlink(missing_ok=True)

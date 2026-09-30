@@ -97,8 +97,13 @@ def main(old,new, published=False):
         env=dict(os.environ,SOFT_TRACKING_INSTALL=str(root),SOFT_TRACKING_HEALTH=str(health),LOCALAPPDATA=temporary,XDG_DATA_HOME=temporary)
         executable=release_path(root,metadata['version'])/'app'/executable_name()
         assert_ui_payload(executable.parent, metadata)
+        # Released supervisors keep the old stop marker until candidate health completes.
+        if metadata.get('ui') == 'electron':
+            env['SOFT_TRACKING_RUN_TOKEN'] = 'previous-runtime-smoke'
+            atomic_json(root/'stop-request.json', {'token': env['SOFT_TRACKING_RUN_TOKEN']})
         result=run_frozen([str(executable),'--health-check'],env=env,timeout=60)
         assert result.returncode==0 and health.exists(),'New frozen version failed its health check'
+        (root/'stop-request.json').unlink(missing_ok=True)
         assert_ui_health(health, metadata)
         assert manager.active()['version']==metadata['version']
         assert read_json(root/'extension/manifest.json')['version']==metadata['extension_version']
