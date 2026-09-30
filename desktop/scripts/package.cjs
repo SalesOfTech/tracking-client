@@ -32,7 +32,14 @@ const {packagePolicy} = require('./package-policy.cjs');
       output = stableOutput;
       const contents = path.join(output, 'SoftTrackingUI.app', 'Contents');
       execFileSync('/usr/bin/plutil', ['-replace', 'CFBundleDisplayName', '-string', 'SOFT Tracking', path.join(contents, 'Info.plist')]);
+      const frameworks = path.join(contents, 'Frameworks');
+      for (const entry of await fs.readdir(frameworks)) {
+        if (entry.startsWith('SOFT Tracking Helper') && entry.endsWith('.app')) {
+          execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', path.join(frameworks, entry)]);
+        }
+      }
       execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', path.dirname(contents)]);
+      execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', path.dirname(contents)]);
       const info = JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', path.join(contents, 'Info.plist')], {encoding: 'utf8'}));
       const expectedIcon = await fs.readFile(path.join(root, '../agent/agent_tracker/assets/app_light.icns'));
       const actualIcon = await fs.readFile(path.join(contents, 'Resources', info.CFBundleIconFile));
