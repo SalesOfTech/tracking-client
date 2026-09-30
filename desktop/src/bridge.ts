@@ -1,4 +1,5 @@
 import type {Language} from './locale';
+import {version as previewVersion} from '../package.json';
 export type View = {
   mode: 'desktop' | 'installer'; language: Language; theme: 'system'; version: string; code: string;
   busy: boolean; error: string; errorText?: string; errorCode?: string; message: string; phase: string; enrolled: boolean;
@@ -10,22 +11,43 @@ export type View = {
 };
 type Bridge = {nativeFrame: boolean; invoke: (action: string, input?: Record<string, unknown>) => Promise<View>; window: (action: string) => Promise<void>};
 declare global {interface Window {tracking?: Bridge}}
-export const isPreview = !window.tracking && new URLSearchParams(location.search).get('preview') === '1';
-export const nativeFrame = window.tracking?.nativeFrame ?? (isPreview && ['darwin', 'linux'].includes(new URLSearchParams(location.search).get('platform') || ''));
+const params = new URLSearchParams(location.search);
+export const isPreview = !window.tracking && params.get('preview') === '1';
+export const nativeFrame = window.tracking?.nativeFrame ?? (isPreview && ['darwin', 'linux'].includes(params.get('platform') || ''));
+const now = Date.now() / 1000;
+const phase = params.get('phase') || 'waiting';
 let preview: View = {
-  mode: new URLSearchParams(location.search).get('mode') === 'installer' ? 'installer' : 'desktop',
-  language: (new URLSearchParams(location.search).get('lang') || 'ru') as Language,
+  mode: params.get('mode') === 'installer' ? 'installer' : 'desktop',
+  language: (params.get('lang') || 'ru') as Language,
   theme: 'system',
-  version: '3.3.0', code: new URLSearchParams(location.search).get('noCode') === '1' ? '' : 'a'.repeat(32), busy: false, error: '', message: '', phase: 'waiting',
-  enrolled: new URLSearchParams(location.search).get('enroll') !== '1',
-  company: 'Demo company', employee: 'Demo employee', collection: new URLSearchParams(location.search).get('paused') === '1' ? 'paused_local' : 'recording', pending: 0, rejected: 0,
-  receipt: {hostname: 'demo.kommo.com', timestamp: Date.now()/1000-90, end_timestamp: Date.now()/1000-15, confirmed_at: Date.now()/1000-5},
-  browsers: [{family: 'Chrome', version: '3.2.0', connected: true, last_seen: Date.now()/1000}],
+  version: previewVersion, code: params.get('noCode') === '1' ? '' : 'a'.repeat(32), busy: false, error: '', message: '', phase: 'waiting',
+  enrolled: params.get('enroll') !== '1',
+  company: 'Demo company', employee: 'Demo employee', collection: params.get('paused') === '1' ? 'paused_local' : 'recording', pending: 0, rejected: 0,
+  receipt: {hostname: 'demo.kommo.com', timestamp: now-90, end_timestamp: now-15, confirmed_at: now-5},
+  browsers: [{family: 'Chrome', version: '3.2.0', connected: true, last_seen: now}],
   domains: ['demo.kommo.com', 'docs.google.com', 'mail.google.com'], programs: ['EXCEL.EXE', 'WINWORD.EXE'],
   policy: {tracking: true, interactions: true, field_values: true, app_inventory: true}, update: 'active',
   admin: {admin_required: true, force_kill_protected: false, autostart: {registered: true, effective: 'enabled'}},
 };
 if (!['ru', 'en', 'cs', 'uz'].includes(preview.language)) preview.language = 'en';
+if (preview.mode === 'installer') {
+  if (['waiting', 'detecting', 'migrating', 'installing', 'complete', 'failed'].includes(phase)) preview.phase = phase;
+  preview.busy = ['detecting', 'migrating', 'installing'].includes(preview.phase);
+  if (preview.phase === 'failed') preview.error = 'setup_migration_failed';
+} else {
+  switch (params.get('state')) {
+    case 'busy': preview.busy = true; break;
+    case 'browser-missing': preview.browsers = []; break;
+    case 'browser-error': preview.browsers![0].error = 'storage_unavailable'; break;
+    case 'failed': preview.deliveryError = true; preview.errorCode = 'ST-DEMO-001'; break;
+    case 'delivery-error': preview.deliveryError = true; break;
+    case 'rejected': preview.rejected = 2; break;
+    case 'awaiting-session': preview.receipt = {}; break;
+    case 'invalid-receipt': preview.receipt = {...preview.receipt, confirmed_at: undefined}; break;
+    case 'stale': preview.receipt = {...preview.receipt, timestamp: now-600, end_timestamp: now-300}; break;
+    case 'paused': preview.collection = 'paused_local'; break;
+  }
+}
 export async function invoke(action: string, input: Record<string, unknown> = {}): Promise<View> {
   if (window.tracking) return window.tracking.invoke(action, input);
   if (!isPreview) throw Error('desktop_bridge_unavailable');
@@ -47,6 +69,10 @@ export async function invoke(action: string, input: Record<string, unknown> = {}
     setTimeout(() => {preview = {...preview, busy: false, phase: 'complete'};}, 2000);
   }
   if (action === 'enroll') preview = {...preview, enrolled: true};
-  if (action === 'check') preview = {...preview, message: 'check_server_ok'};
+  if (action === 'check') {
+    preview = {...preview, busy: true};
+    await new Promise(resolve => setTimeout(resolve, 350));
+    preview = {...preview, busy: false, message: preview.deliveryError ? 'check_offline' : preview.browsers?.some(row => row.connected && !row.error) ? 'check_server_ok' : 'check_browser_missing'};
+  }
   return {...preview};
 }

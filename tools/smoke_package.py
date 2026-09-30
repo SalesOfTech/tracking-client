@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from packaging.version import Version
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'agent'))
@@ -48,6 +49,15 @@ def main(bundle):
         if result.returncode!=0 or not health.exists():
             raise RuntimeError('Frozen application health check failed: '+result.stderr.decode(errors='replace'))
         assert_ui_health(health, metadata)
+        if Version(version) >= Version('3.4.0'):
+            installer = bundle.parent / {'windows': 'SOFT-Tracking-Setup.exe',
+                                         'macos': 'SOFT-Tracking-Setup.app/Contents/MacOS/SOFT-Tracking-Setup',
+                                         'linux': 'SOFT-Tracking-Setup.run'}[metadata['os']]
+            migration_marker = Path(temporary) / 'automatic-migration-smoke.json'
+            result = run_frozen([str(installer), '--migration-self-test'],
+                                env=dict(env, SOFT_TRACKING_MIGRATION_SMOKE=str(migration_marker)), timeout=180)
+            if result.returncode or not migration_marker.is_file() or json.loads(migration_marker.read_text()) != {'ok': True, 'isolated': True}:
+                raise RuntimeError('Frozen full installer automatic migration smoke failed')
         if metadata.get('ui') == 'electron':
             installer = bundle.parent / {'windows': 'SOFT-Tracking-Setup.exe',
                                          'macos': 'SOFT-Tracking-Setup.app/Contents/MacOS/SOFT-Tracking-Setup',

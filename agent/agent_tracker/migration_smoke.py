@@ -63,3 +63,63 @@ def run(bundle):
                 patch.object(migration.subprocess, 'Popen'):
             journal = migration.migrate(bundle)
             assert read_json(journal)['state'] == 'complete'
+
+
+def run_automatic(bundle):
+    from . import automatic_migration as automatic
+    with tempfile.TemporaryDirectory(prefix='soft-automatic-migration-smoke-') as temporary:
+        root = Path(temporary) / 'v3'
+        metadata = dict(company_id=1, username='fixture', machine='fixture', os='windows',
+                        install_id='9e2d3d72-8594-4d1e-b7a7-99dbbe937d61')
+        snapshot = dict(root=str(root), owner='fixture', metadata=metadata)
+        steps = []
+
+        def redeemed(*args):
+            client = Client(root)
+            try:
+                steps.append('enroll')
+                return dict(ok=True, company_code='a' * 32, device_id=client.device['device_id'],
+                            company_id=1, user_id=7, company_name='Fixture', user_name='Fixture',
+                            expires_at=int(time.time()) + 300)
+            finally:
+                client.close()
+                client.http.session.close()
+
+        def configuration(client, active, path, payload):
+            assert path == '/client/v3/config'
+            steps.append('config')
+            return dict(ok=True, device_id=active['device']['device_id'],
+                        identity=dict(device_id=active['device']['device_id'], company_id=1,
+                                      user_id=7, company_name='Fixture', user_name='Fixture'),
+                        config={'policy_expires_at': int(time.time()) + 300, 'tracking': False})
+
+        def retire(source, install):
+            assert source == snapshot and install == root / 'install'
+            client = Client(root)
+            try:
+                assert client.state.get('identity')['user_id'] == 7
+                assert (install / 'current.json').is_file()
+            finally:
+                client.close()
+                client.http.session.close()
+            steps.append('retire')
+
+        with patch.object(requests.Session, 'request', side_effect=AssertionError('Network prohibited in smoke')), \
+                patch.object(automatic, 'workspace', return_value=root), \
+                patch.object(automatic.legacy_discovery, 'discover', return_value=snapshot), \
+                patch.object(automatic.legacy_discovery, 'revalidate'), \
+                patch.object(automatic.legacy_discovery, 'retire', side_effect=retire), \
+                patch.object(automatic.legacy_discovery, 'restore'), \
+                patch.object(automatic, 'protect_workspace'), \
+                patch.object(automatic, 'credentials', side_effect=redeemed), \
+                patch.object(Client, '_post', configuration), \
+                patch.object(automatic.installer, 'installed_health', side_effect=lambda *args: steps.append('health')), \
+                patch.object(automatic.installer, 'register_host'), \
+                patch.object(automatic.installer, 'shortcuts'), \
+                patch.object(automatic.installer, 'register_uninstaller'), \
+                patch.object(automatic, 'autostart'), \
+                patch.object(automatic.subprocess, 'Popen', side_effect=lambda *args: steps.append('launch')):
+            launcher, code = automatic.try_migrate(bundle)
+            assert launcher.is_file() and code == 'a' * 32
+            assert read_json(root / automatic.JOURNAL)['state'] == 'complete'
+            assert steps == ['enroll', 'config', 'health', 'retire', 'launch']

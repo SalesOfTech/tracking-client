@@ -31,7 +31,7 @@ function sourceModule(filename, globals = {}) {
   const ts = require('typescript'), vm = require('node:vm');
   const source = fs.readFileSync(path.join(__dirname, '../src', filename), 'utf8');
   const code = ts.transpileModule(source, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022}}).outputText;
-  const context = vm.createContext({exports: {}, URLSearchParams, setTimeout, ...globals});
+  const context = vm.createContext({exports: {}, URLSearchParams, setTimeout, require: name => {assert.equal(name, '../package.json'); return require('../package.json');}, ...globals});
   vm.runInContext(code, context);
   return context.exports;
 }
@@ -60,7 +60,10 @@ test('resume caption has four languages and the action is conditional on local p
     assert.equal(locale.text(language, 'resume'), caption);
   }
   const ui = fs.readFileSync(path.join(__dirname, '../src/main.tsx'), 'utf8');
-  assert.match(ui, /view\.collection === 'paused_local' && <Button onPress=\{\(\) => void act\('resume'\)\} isDisabled=\{busy\}/);
+  const {connectionState} = sourceModule('connection-state.ts');
+  assert.equal(connectionState({enrolled: true, collection: 'paused_local'}).action, 'resume');
+  assert.notEqual(connectionState({enrolled: true, collection: 'disabled_policy'}).action, 'resume');
+  assert.ok(ui.includes('act(status.action)'));
   assert.ok(!ui.includes("act('pause')"));
 });
 test('Electron has a sandbox, isolated preload and no remote content or arbitrary shell API', () => {

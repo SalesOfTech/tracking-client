@@ -1,4 +1,14 @@
 {
+  "3.3.2": {
+    "linux-arm64-modern": [601287392, "4da71d66016e7d16de77cec7aac9f23c6f9870dad1fe0a5ae5c670eef5abcb00"],
+    "linux-x64-modern": [601286023, "8aafd0755d8d7e069bf5ac0ddb63eb2a41e86efebb7c22dbc62cccca0a714aa7"],
+    "macos-arm64-modern": [601284818, "956bd767ccc1177ef44ae20b7065e3cca7e2ce8a23165c9b09ec398a9a112fcb"],
+    "macos-x64-modern": [601283369, "32658e4ad37f162d0a2b8a096dc2b3f6ec8694006ed5d0a995a3290478931d4f"],
+    "windows-arm64-modern": [601280782, "44c8d94c6ccb14ab300fcd0c634f700789167a046251e9f2f7bd1e9f136a8f10"],
+    "windows-x64-legacy": [601279511, "53a4eeed42fedd9972e67ace8ee69cb9a5f8de1b46112f164494306963b5a961"],
+    "windows-x64-modern": [601277511, "90dea947220f31715fac9647fcf7902fae61a0547d3bcb377a35c68410a67371"],
+    "windows-x86-legacy": [601278773, "46e0aa1c2f081f42778b1609969cdc9754fcfb985dfb0e4a3d66c8764f02f8e6"]
+  },
   "3.3.0": {
     "linux-arm64-modern": [600417922, "5f56962d9b1874e247caa1bf0d30710e1df17605ec5078668d358672402d2c5b"],
     "linux-x64-modern": [600417076, "0c48c176f1b2e1de77f031a75e2aa2b27d1f782db96784aada13f77e87d71ff2"],

@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const http = require('node:http');
 const path = require('node:path');
 const {chromium} = require('../../node_modules/playwright');
+const {verifyConnection, verifyInstallerMigration} = require('./connection.ui.cjs');
 const root = path.resolve(__dirname, '../dist');
 
 (async () => {
@@ -18,10 +19,13 @@ const root = path.resolve(__dirname, '../dist');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({headless: true});
-  const output = path.resolve(__dirname, '../../artifacts/verification');
-  await fs.mkdir(output, {recursive: true});
+  let browser;
+  const output = process.env.TRACKING_UI_OUTPUT || path.join(require('node:os').tmpdir(), 'soft-tracking-ui');
   try {
+    browser = await chromium.launch({headless: true, ignoreDefaultArgs: ['--hide-scrollbars']});
+    await fs.mkdir(output, {recursive: true});
+    await verifyConnection(browser, origin, output);
+    await verifyInstallerMigration(browser, origin, output);
     for (const language of ['ru','en','cs','uz']) {
       for (const theme of ['light','dark']) {
         const page = await browser.newPage({viewport: {width: 1024, height: 760}, colorScheme: theme});
@@ -105,5 +109,9 @@ const root = path.resolve(__dirname, '../dist');
     }
     await page.close();
     console.log('HeroUI: 4 languages, 2 themes, activation and installer passed');
-  } finally {await browser.close(); server.close();}
+    console.log(`UI screenshots: ${output}`);
+  } finally {
+    try {await browser?.close();}
+    finally {await new Promise(resolve => server.close(resolve));}
+  }
 })().catch(error => {console.error(error); process.exitCode = 1;});

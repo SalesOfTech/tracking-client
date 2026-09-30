@@ -75,6 +75,7 @@ class Controller:
         self.error_code = ''
         self.job, self.launcher = None, None
         self.phase = 'waiting'
+        self.migration_probed = False
         self.health, self.ready, self.exit_requested = health, False, False
         from .admin_control import AdminControl
         self.admin = AdminControl(install)
@@ -129,6 +130,7 @@ class Controller:
                 # Never expose request bodies, tokens, filesystem paths or server traces.
                 allowed = {'setup_code_required', 'setup_company_conflict', 'setup_company_unavailable',
                            'setup_existing_damaged', 'setup_upgrade_failed', 'setup_wrong_target', 'setup_close_required',
+                           'setup_migration_failed',
                            'employee_switch_not_ready', 'employee_switch_pending_activity', 'stop_pending_activity', 'browser_not_found', 'browser_open_failed'}
                 self.error = str(error) if str(error) in allowed else 'setup_failed' if self.bundle else 'connect_failed'
                 if self.client:
@@ -151,6 +153,19 @@ class Controller:
             self.ready = True
             if os.environ.get('SOFT_TRACKING_HEALTH'):
                 atomic_json(Path(os.environ['SOFT_TRACKING_HEALTH']), {'ready': True, 'ui': 'electron'})
+            if self.bundle and not self.health and not self.migration_probed:
+                self.migration_probed = True
+                self.phase = 'detecting'
+                def migrate():
+                    from .automatic_migration import try_migrate
+                    result = try_migrate(self.bundle, self.language, self.code,
+                                         on_phase=lambda phase: setattr(self, 'phase', phase))
+                    if result:
+                        self.launcher, self.code = result
+                        self.phase = 'complete'
+                    else:
+                        self.phase = 'waiting'
+                self.task(migrate)
             return {}
         if action == 'preferences':
             for key in ('language',):

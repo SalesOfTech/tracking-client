@@ -1,4 +1,51 @@
-# Personalized Legacy migration (Windows pilot)
+# Legacy migration
+
+## Full installer, version 3.4.0
+
+The full installer probes for Legacy before requesting a key. When the current OS
+account has one identifiable installation with an existing server-side employee
+mapping and historical install-ID receipt, migration runs automatically. There is
+no company migration toggle, personalized filename, second code, or approval step.
+An existing completed v3 installation is upgraded normally and is never reassigned
+from a nearby Legacy process. Without Legacy, the ordinary one-key setup remains.
+
+The installer sends company ID, exact OS username/machine/OS and the saved Legacy
+installation UUID to `POST /client/v3/migration_auto`, together with newly generated,
+durable device credentials. The backend checks a unique active, nondefault Legacy
+mapping and an already stored receipt for the same company, employee, username,
+machine and UUID. Disabled accounts, ambiguous mappings and missing history fail
+closed. It binds the source once to the new device and permits retries only with
+the same device credentials. Existing employee keys are not rotated or returned.
+
+This is a deliberately weaker trust model than the CRM-authorized flow below:
+Legacy identifiers and historical receipts are not cryptographic device identity.
+Someone who obtains the complete Legacy metadata can attempt to claim an unmigrated
+source first. Exact matching, one-use claims, rate limits and audit records constrain
+that risk; they do not eliminate it. Local detection alone cannot authenticate a
+remote HTTP request. Do not describe this endpoint as proof of device possession.
+
+Windows detection uses the current account and RDP session; shared executables and
+other users' processes are not deleted. macOS detection reads the current user's
+Legacy bundle and LaunchAgent, plus the saved install UUID. A successfully retired
+user-owned macOS bundle and its startup file are kept in a protected rollback
+directory. Shared `/Applications` installations require review, not silent removal.
+Linux had no shipped Legacy agent layout in this repository: its new installer
+continues normal setup without inventing a migration. Recognized unsupported old
+processes stop automatic migration instead of being killed indiscriminately.
+
+Preparation verifies the signed package, fetches a fresh device-authenticated
+configuration and runs installed health checks. Only then is startup switched and
+Legacy stopped. `automatic-migration.json` contains the local snapshot and progress,
+but no employee key or new device secret. Retrying preserves the device identity.
+An interrupted `switching` step restores the captured Legacy installation before
+rediscovery; restoration failure stops with `ST-MIGRATION`. Retired files are kept
+for recovery. The old in-memory activity queue can be lost when Legacy is stopped.
+
+The installer health-check mode never scans or migrates the real account. Unit
+tests cover ordering, retries, conflicts and rollback with isolated fixtures. Native
+release acceptance and a real migration pilot are separate verification boundaries.
+
+## Personalized migration tool (Windows pilot)
 
 This is a user-run migration tool, not the broken Legacy updater. Download the
 personalized executable from authenticated CRM for the exact Legacy installation,

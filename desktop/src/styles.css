@@ -1,8 +1,8 @@
 @import 'tailwindcss';
 @import '@heroui/styles';
 
-:root {font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; --background: #ffffff; --foreground: #20262d; --surface: #ffffff; --surface-secondary: #f3f5f7; --muted: #6a737f; --border: #e3e7ed; --accent: #087fea; --accent-foreground: #ffffff; --success-text: #168366; --active-bg: #e8f3ff; --sidebar: #f6f8fa; --radius: .5rem;}
-:root.dark {--background: #191b1f; --foreground: #edf0f4; --surface: #23262b; --surface-secondary: #2b2f35; --muted: #a4acb8; --border: #353a42; --accent: #54a7ff; --accent-foreground: #102132; --success-text: #66cdae; --active-bg: #223c55; --sidebar: #202328;}
+:root {font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; --background: #ffffff; --foreground: #20262d; --surface: #ffffff; --surface-secondary: #f3f5f7; --muted: #6a737f; --border: #e3e7ed; --accent: #087fea; --accent-foreground: #ffffff; --success-text: #168366; --danger-text: #c82f45; --active-bg: #e8f3ff; --sidebar: #f6f8fa; --radius: .5rem;}
+:root.dark {--background: #191b1f; --foreground: #edf0f4; --surface: #23262b; --surface-secondary: #2b2f35; --muted: #a4acb8; --border: #353a42; --accent: #54a7ff; --accent-foreground: #102132; --success-text: #66cdae; --danger-text: #ff8090; --active-bg: #223c55; --sidebar: #202328;}
 * {box-sizing: border-box; letter-spacing: 0;}
 body {margin: 0; font-size: 14px; background: var(--background); color: var(--foreground);}
 button, input {font: inherit;}
@@ -42,7 +42,7 @@ h2 {font-size: 19px; line-height: 1.35; font-weight: 600; margin: 0;}
 h3 {font-size: 14px; line-height: 1.4; font-weight: 600; margin: 0;}
 p {margin: 0; line-height: 1.6;}
 .header-controls {display: flex; align-items: center; gap: 8px;}
-.content-scroll {flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable;}
+.content-scroll {flex: 1; min-height: 0; overflow-y: scroll; scrollbar-gutter: stable; scrollbar-width: auto; scrollbar-color: auto; --scroll-shadow-scrollbar-size: 12px;}
 .content-scroll::-webkit-scrollbar {width: 12px; height: 12px;}
 .content-scroll::-webkit-scrollbar-track {background: var(--surface-secondary);}
 .content-scroll::-webkit-scrollbar-thumb {background: var(--muted); border: 3px solid var(--surface-secondary); border-radius: 6px; min-height: 32px;}
@@ -50,30 +50,48 @@ p {margin: 0; line-height: 1.6;}
 .page-content {padding: 0 30px 30px; max-width: 1150px; margin: 0 auto;}
 .muted {color: var(--muted);}
 .success {color: var(--success-text);}
+.danger {color: var(--danger-text);}
 .warning-text {color: #ba872b;}
-.connection-status {display: flex; align-items: center; gap: 16px; padding: 21px 0; border-bottom: 1px solid var(--border);}
-.connection-status .status-icon {width: 49px; height: 49px; flex-shrink: 0; border-radius: 8px; display: grid; place-items: center; background: var(--active-bg); color: var(--accent);}
-.connection-status.healthy .status-icon {background: color-mix(in srgb, var(--success-text) 11%, transparent); color: var(--success-text);}
-.connection-status > div:nth-child(2) {flex: 1; min-width: 0;}
-.connection-status p {color: var(--muted); font-size: 12px; margin-top: 5px; overflow-wrap: anywhere;}
+.connection-page {max-width: 1080px;}
+.connection-status {display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: start; gap: 12px; padding: 4px 0 20px; border-bottom: 1px solid var(--border);}
+.connection-status .status-icon {width: 48px; height: 48px; border-radius: 8px; display: grid; place-items: center;}
+.connection-status .status-copy {min-width: 0;}
+.connection-status h2 {margin-top: 7px; font-size: 18px; line-height: 1.4; overflow-wrap: anywhere;}
+.connection-status p {color: var(--muted); max-width: 560px; font-size: 12px; line-height: 1.6; margin-top: 6px; overflow-wrap: anywhere;}
+.status-action {max-width: 100%; padding-top: 2px;}
+.status-action .button {max-width: 100%; white-space: normal; height: auto; text-align: left;}
+.status-refresh .button {width: 36px; height: 36px; padding: 0;}
+.connection-status.state-success .status-icon {color: var(--success-text); background: color-mix(in srgb, var(--success-text) 13%, transparent);}
+.connection-status.state-danger .status-icon {color: var(--danger-text); background: color-mix(in srgb, var(--danger-text) 13%, transparent);}
+.connection-status.state-accent .status-icon {color: var(--accent); background: var(--active-bg);}
+.connection-page .identity-row {min-height: 50px;}
+.connection-page .receipt-section {padding-top: 20px;}
+.receipt-empty {padding: 2px 0 12px; color: var(--muted); font-size: 13px;}
+.connection-page .queue-row {padding: 16px 0; border-bottom: 1px solid var(--border); margin-bottom: 16px;}
+.connection-actions {justify-content: flex-end;}
+.connection-actions .button {max-width: 100%; height: auto; white-space: normal;}
+@media (max-width: 800px) {
+  .status-action:not(.status-refresh) {grid-column: 2 / -1; justify-self: start;}
+  .connection-status:has(.status-action:not(.status-refresh)) .status-copy {grid-column: 2 / -1;}
+}
 .identity-rows {margin-top: 8px;}
-.identity-row {display: grid; grid-template-columns: 24px 110px minmax(0, 1fr) 20px; gap: 12px; align-items: center; min-height: 57px; border-bottom: 1px solid var(--border);}
+.identity-row {display: grid; grid-template-columns: 24px 110px minmax(0, 1fr) 32px; gap: 12px; align-items: center; min-height: 57px; border-bottom: 1px solid var(--border); padding: 5px 0;}
 .identity-row > svg:first-child {color: var(--muted);}
 .identity-row strong {font-weight: 500; overflow-wrap: anywhere; text-align: right;}
 .identity-row span {color: var(--muted); font-size: 13px;}
 .receipt-section {padding-top: 27px;}
 .receipt-section h3 {color: var(--muted); font-size: 12px; font-weight: 500; margin-bottom: 15px;}
 .receipt-title {display: flex; gap: 10px; align-items: center;}
+.receipt-title > svg {flex-shrink: 0; color: var(--muted);}
 .receipt-title strong {font-size: 17px; font-weight: 600; flex: 1; overflow-wrap: anywhere;}
-.receipt-title > span {font-variant-numeric: tabular-nums; font-weight: 600; color: var(--success-text);}
+.receipt-title > span {font-variant-numeric: tabular-nums; font-weight: 500; white-space: nowrap;}
 .time-range {display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; margin: 9px 0 13px;}
-.delivery-line {display: flex; flex-wrap: wrap; gap: 7px; align-items: center; border-top: 3px solid var(--success-text); padding-top: 9px; color: var(--success-text); font-size: 12px;}
+.delivery-line {display: flex; flex-wrap: wrap; gap: 7px; align-items: center; border-top: 1px solid var(--border); padding-top: 9px; color: var(--muted); font-size: 12px;}
 .delivery-line time {margin-left: auto; color: var(--muted);}
 .queue-row {display: flex; flex-wrap: wrap; gap: 20px; padding: 24px 0; font-size: 12px; color: var(--muted);}
 .queue-row > span {display: flex; align-items: center; gap: 7px;}
 .queue-row strong {color: var(--foreground); margin-left: 5px; font-size: 14px;}
 .actions {display: flex; flex-wrap: wrap; gap: 9px; align-items: center; margin-top: 3px;}
-.switch-employee-button {margin-top: 10px;}
 .employee-switch {display: grid; gap: 14px; padding: 20px 0; border-bottom: 1px solid var(--border);}
 .employee-switch p, .agent-control p, .protection-note {font-size: 12px;}
 .agent-control {display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 15px;}
@@ -95,7 +113,7 @@ p {margin: 0; line-height: 1.6;}
 .privacy-notice svg {flex-shrink: 0; margin-top: 2px;}
 .notice {display: flex; align-items: flex-start; gap: 10px; padding: 12px 0; font-size: 13px;}
 .notice svg {flex-shrink: 0; margin-top: 2px;}
-.notice.error {color: #d75560;}
+.notice.error {color: var(--danger-text);}
 .notice.warning {color: #b27c22;}
 .empty-state {padding: 35px 0; color: var(--muted); font-size: 13px;}
 .section-intro {font-size: 13px; margin-top: 8px; margin-bottom: 18px;}
@@ -146,5 +164,5 @@ p {margin: 0; line-height: 1.6;}
 .spin {animation: rotate 1s linear infinite;}
 @keyframes rotate {to {transform: rotate(360deg);}}
 @media (prefers-reduced-motion: reduce) {.spin {animation: none;}}
-@media (max-width: 800px) {.workspace {grid-template-columns: 165px minmax(0, 1fr);} .page-header {padding: 20px;} .page-content {padding: 0 20px 24px;} .sidebar {padding: 22px 8px 12px;} .sidebar .button {gap: 9px; font-size: 12px;} .language-select {min-width: 140px; width: 140px;} .status-footer {padding: 11px 20px;} .identity-row {grid-template-columns: 22px 88px minmax(0, 1fr) 18px; gap: 8px;} .identity-row strong {font-size: 12px;}}
-@media (max-width: 560px) {.workspace {grid-template-columns: 62px minmax(0, 1fr);} .sidebar .brand strong, .sidebar nav span, .sidebar .help-button span {display: none;} .brand {margin: 0 2px 28px;} .brand img {width: 36px; height: 36px;} .sidebar .button {padding: 10px; justify-content: center;} .page-header {align-items: flex-start;} .page-header h1 {font-size: 21px;} .header-controls {width: 100%;} .installer-main {padding: 28px 24px 18px;} .installer-main h1 {font-size: 23px;} .installer-brand {width: 62px; height: 62px; margin-bottom: 18px;} .installer-footer {padding: 13px 15px;} .identity-row {grid-template-columns: 20px 1fr 18px;} .identity-row > span {display: none;} .identity-row strong {text-align: left;} .connection-status {gap: 10px;} .connection-status h2 {font-size: 17px;} .connection-status .status-icon {width: 37px; height: 37px;} .receipt-title strong {font-size: 14px;} .browser-row {flex-wrap: wrap;} .status-footer {font-size: 10px;} .queue-row {gap: 12px;} }
+@media (max-width: 800px) {.workspace {grid-template-columns: 165px minmax(0, 1fr);} .page-header {padding: 20px;} .page-content {padding: 0 20px 24px;} .sidebar {padding: 22px 8px 12px;} .sidebar .button {gap: 9px; font-size: 12px;} .language-select {min-width: 140px; width: 140px;} .status-footer {padding: 11px 20px;} .identity-row {grid-template-columns: 22px 88px minmax(0, 1fr) 32px; gap: 8px;} .identity-row strong {font-size: 12px;}}
+@media (max-width: 560px) {.workspace {grid-template-columns: 62px minmax(0, 1fr);} .sidebar .brand strong, .sidebar nav span, .sidebar .help-button span {display: none;} .brand {margin: 0 2px 28px;} .brand img {width: 36px; height: 36px;} .sidebar .button {padding: 10px; justify-content: center;} .page-header {align-items: flex-start;} .page-header h1 {font-size: 21px;} .header-controls {width: 100%;} .installer-main {padding: 28px 24px 18px;} .installer-main h1 {font-size: 23px;} .installer-brand {width: 62px; height: 62px; margin-bottom: 18px;} .installer-footer {padding: 13px 15px;} .identity-row {grid-template-columns: 20px minmax(0, 1fr) 32px;} .identity-row > span {display: none;} .identity-row strong {text-align: left;} .connection-status {grid-template-columns: 37px minmax(0, 1fr) 36px; gap: 10px;} .connection-status h2 {font-size: 17px;} .connection-status .status-icon {width: 37px; height: 37px;} .receipt-title strong {font-size: 14px;} .browser-row {flex-wrap: wrap;} .status-footer {font-size: 10px;} .queue-row {gap: 12px;} }

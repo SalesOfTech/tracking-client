@@ -94,6 +94,30 @@ class SetupEntryTests(unittest.TestCase):
         self.assertEqual(error.exception.code, 7)
         self.assertFalse(Path(str(self.health) + '.error').exists())
 
+    def test_explicit_migration_smoke_never_starts_installer_ui(self):
+        smoke = types.ModuleType('agent_tracker.migration_smoke')
+        smoke.run_automatic = Mock()
+        marker = self.root / 'migration.json'
+        with patch.object(sys, 'argv', ['setup.exe', '--migration-self-test']), \
+                patch.dict(os.environ, SOFT_TRACKING_MIGRATION_SMOKE=str(marker)), \
+                patch.dict(sys.modules, {'agent_tracker.migration_smoke': smoke}):
+            self.assertEqual(self.entry['entrypoint'](), 0)
+        smoke.run_automatic.assert_called_once_with(self.root / 'setup-payload')
+        self.assertTrue(marker.is_file())
+        self.electron.installer_main.assert_not_called()
+        self.legacy.main.assert_not_called()
+
+    def test_migration_smoke_failure_exits_without_window_or_secret(self):
+        smoke = types.ModuleType('agent_tracker.migration_smoke')
+        smoke.run_automatic = Mock(side_effect=RuntimeError('private-value'))
+        marker = self.root / 'migration.json'
+        with patch.object(sys, 'argv', ['setup.exe', '--migration-self-test']), \
+                patch.dict(os.environ, SOFT_TRACKING_MIGRATION_SMOKE=str(marker)), \
+                patch.dict(sys.modules, {'agent_tracker.migration_smoke': smoke}):
+            self.assertEqual(self.entry['entrypoint'](), 1)
+        self.assertFalse(marker.exists())
+        self.assertNotIn('private-value', Path(str(marker) + '.error').read_text())
+
 
 if __name__ == '__main__':
     unittest.main()

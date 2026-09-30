@@ -334,7 +334,7 @@ def shortcuts(root):
 
 
 class InstallerWindow:
-    def __init__(self, bundle, company_code="", language=""):
+    def __init__(self, bundle, company_code="", language="", auto_migrate=False):
         import tkinter as tk
         from tkinter import ttk
         from .ui.theme import apply_theme
@@ -385,6 +385,8 @@ class InstallerWindow:
         self.button.grid(row=9, column=1, sticky="e", pady=(18, 0))
         self.render_language()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
+        if auto_migrate:
+            self.root.after(100, self.detect_legacy)
 
     def t(self, key):
         return translate(self.language, key)
@@ -410,6 +412,30 @@ class InstallerWindow:
         except (OSError, webbrowser.Error):
             from tkinter import messagebox
             messagebox.showerror("SOFT Tracking", self.t("package_missing"))
+
+    def detect_legacy(self):
+        if self.thread and self.thread.is_alive():
+            return
+        for control in (self.button, self.code, self.selector):
+            control.state(["disabled"])
+        self.status_key = "setup_detecting_legacy"
+        self.render_language()
+        self.progress.grid()
+        self.progress.start()
+        def task():
+            from .automatic_migration import try_migrate
+            try:
+                result = try_migrate(self.bundle, self.language_override, self.company_code)
+                if result:
+                    self.outcome['launcher'], _ = result
+                    self.outcome['already_launched'] = True
+                else:
+                    self.outcome['no_legacy'] = True
+            except Exception:
+                self.outcome['error_key'] = 'setup_migration_failed'
+        self.thread = threading.Thread(target=task)
+        self.thread.start()
+        self.root.after(100, self.poll)
 
     def start(self):
         if self.thread and self.thread.is_alive():
@@ -443,6 +469,12 @@ class InstallerWindow:
             return
         self.progress.stop()
         self.progress.grid_remove()
+        if self.outcome.pop('no_legacy', False):
+            self.status_key = ""
+            for control in (self.button, self.code, self.selector):
+                control.state(["!disabled"])
+            self.render_language()
+            return
         if "error" in self.outcome or "error_key" in self.outcome:
             self.status_key = "setup_failed"
             self.details_key = self.outcome.pop("error_key", "")
@@ -454,7 +486,8 @@ class InstallerWindow:
         self.status_key = "setup_complete"
         self.render_language()
         try:
-            subprocess.Popen([str(self.outcome["launcher"])])
+            if not self.outcome.pop('already_launched', False):
+                subprocess.Popen([str(self.outcome["launcher"])])
         except OSError:
             self.status_key = "launch_failed"
             self.render_language()
@@ -472,5 +505,5 @@ def main():
         code = bootstrap_code(sys.executable)
     except Exception:
         code = ""
-    InstallerWindow(bundle, code).root.mainloop()
+    InstallerWindow(bundle, code, auto_migrate='--health-check' not in sys.argv).root.mainloop()
     return 0
