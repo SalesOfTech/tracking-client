@@ -57,7 +57,9 @@ def main(bundle):
             result = run_frozen([str(installer), '--migration-self-test'],
                                 env=dict(env, SOFT_TRACKING_MIGRATION_SMOKE=str(migration_marker)), timeout=180)
             if result.returncode or not migration_marker.is_file() or json.loads(migration_marker.read_text()) != {'ok': True, 'isolated': True}:
-                raise RuntimeError('Frozen full installer automatic migration smoke failed')
+                diagnostic = Path(str(migration_marker) + '.error')
+                detail = diagnostic.read_text(encoding='utf-8')[:8000] if diagnostic.is_file() else 'No diagnostic marker'
+                raise RuntimeError('Frozen full installer automatic migration smoke failed: ' + detail)
         if metadata.get('ui') == 'electron':
             installer = bundle.parent / {'windows': 'SOFT-Tracking-Setup.exe',
                                          'macos': 'SOFT-Tracking-Setup.app/Contents/MacOS/SOFT-Tracking-Setup',

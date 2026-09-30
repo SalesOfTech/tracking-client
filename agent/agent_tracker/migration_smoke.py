@@ -2,7 +2,8 @@
 from pathlib import Path
 import tempfile
 import time
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import requests
 
@@ -60,7 +61,7 @@ def run(bundle):
                 patch.object(migration.installer, 'register_uninstaller'), \
                 patch.object(migration, 'autostart'), \
                 patch.object(migration.legacy_migration, 'replace_current_user', side_effect=retire), \
-                patch.object(migration.subprocess, 'Popen'):
+                patch.object(migration, 'subprocess', SimpleNamespace(Popen=Mock())):
             journal = migration.migrate(bundle)
             assert read_json(journal)['state'] == 'complete'
 
@@ -118,7 +119,7 @@ def run_automatic(bundle):
                 patch.object(automatic.installer, 'shortcuts'), \
                 patch.object(automatic.installer, 'register_uninstaller'), \
                 patch.object(automatic, 'autostart'), \
-                patch.object(automatic.subprocess, 'Popen', side_effect=lambda *args: steps.append('launch')):
+                patch.object(automatic, 'subprocess', SimpleNamespace(Popen=lambda *args: steps.append('launch'))):
             launcher, code = automatic.try_migrate(bundle)
             assert launcher.is_file() and code == 'a' * 32
             assert read_json(root / automatic.JOURNAL)['state'] == 'complete'
