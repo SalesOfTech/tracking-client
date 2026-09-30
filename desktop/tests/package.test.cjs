@@ -18,6 +18,18 @@ test('packaging uses the installed dependency named packager export', () => {
 const localHost = {argv: ['--local-test'], env: {RELEASE_VERSION: '3.2.0-rc.1'},
   platform: 'win32', arch: 'x64', machine: 'AMD64'};
 
+test('macOS package uses brand icon and display names without changing update paths', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../scripts/package.cjs'), 'utf8');
+  assert.match(source, /app_light\.icns/);
+  assert.match(source, /CFBundleName: 'SOFT Tracking', CFBundleDisplayName: 'SOFT Tracking'/);
+  assert.match(source, /executableName: 'SoftTrackingUI'/);
+  assert.match(source, /actualIcon\.equals\(expectedIcon\)/);
+  assert.match(source, /macOS application branding verification failed/);
+  const icon = fs.readFileSync(path.join(__dirname, '../../agent/agent_tracker/assets/app_light.icns'));
+  assert.equal(icon.subarray(0, 4).toString('ascii'), 'icns');
+  assert.equal(icon.readUInt32BE(4), icon.length);
+});
+
 test('local packaging requires the explicit flag and never changes GitHub environment', () => {
   const env = {RELEASE_VERSION: '3.2.0-rc.1'};
   assert.throws(() => packagePolicy({...localHost, argv: [], env}), /only in GitHub Actions/);
