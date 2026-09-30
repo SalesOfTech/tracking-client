@@ -99,6 +99,23 @@ class Worker(threading.Thread):
             self.sync_requested.set()
             return identity
 
+    def check_connection(self):
+        if not self.operation_lock.acquire(timeout=10):
+            return 'check_pending'
+        try:
+            if self.stopping.is_set():
+                return 'check_pending'
+            try:
+                self.client.refresh_config()
+                self.client.flush()
+            except Exception:
+                self.client.state.set('error', 'server_unavailable')
+                return 'check_offline'
+            self.client.state.set('error', self._checkpoint_error or self.capability_error)
+            return 'check_server_ok'
+        finally:
+            self.operation_lock.release()
+
     def run(self):
         with self.operation_lock:
             self._start_tracker()

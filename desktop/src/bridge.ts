@@ -47,6 +47,6 @@ export async function invoke(action: string, input: Record<string, unknown> = {}
     setTimeout(() => {preview = {...preview, busy: false, phase: 'complete'};}, 2000);
   }
   if (action === 'enroll') preview = {...preview, enrolled: true};
-  if (action === 'check') preview = {...preview, message: 'check_complete'};
+  if (action === 'check') preview = {...preview, message: 'check_server_ok'};
   return {...preview};
 }

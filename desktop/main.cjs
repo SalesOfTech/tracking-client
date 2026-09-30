@@ -1,5 +1,5 @@
 'use strict';
-const {app, BrowserWindow, ipcMain, nativeTheme, Menu, Tray} = require('electron');
+const {app, BrowserWindow, ipcMain, nativeTheme, nativeImage, Menu, Tray} = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const {pathToFileURL} = require('node:url');
@@ -110,7 +110,8 @@ app.whenReady().then(() => {
   });
   if (mode === 'desktop' && !health) {
     try {
-      tray = new Tray(path.join(__dirname, 'brand.png'));
+      const icon = nativeImage.createFromPath(path.join(__dirname, 'brand.png'));
+      tray = new Tray(process.platform === 'darwin' ? icon.resize({width: 18, height: 18}) : icon);
       tray.setToolTip('SOFT Tracking');
       tray.on('click', () => {window.show(); window.focus();});
       tray.setContextMenu(Menu.buildFromTemplate([{label: 'SOFT Tracking', click: () => {window.show(); window.focus();}}]));

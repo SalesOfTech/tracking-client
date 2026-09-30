@@ -185,8 +185,14 @@ class Controller:
                 self.client.enroll(code, data['key'])
                 if self.install:
                     from .legacy_migration import replace_current_user
-                    replace_current_user(self.install)
-                self.worker.sync_requested.set()
+                    try:
+                        replace_current_user(self.install)
+                    except Exception:
+                        self.message = 'legacy_cleanup_warning'
+                if self.worker:
+                    self.worker.sync_requested.set()
+                if self.message == 'legacy_cleanup_warning':
+                    return
                 self.message = 'connected'
             self.task(enroll)
         elif action == 'switch-employee' and self.client and self.worker and self.code:
@@ -227,9 +233,10 @@ class Controller:
                 if action == 'retry':
                     self.client.retry_rejected()
                     self.client.state.set('retry_generation', int(time.time() * 1000))
-                if self.worker:
-                    self.worker.sync_requested.set()
-                self.message = 'check_complete'
+                self.message = self.worker.check_connection() if self.worker else 'check_pending'
+                if self.message == 'check_server_ok':
+                    rows = connections(self.client)
+                    self.message = 'check_browser_missing' if not any(row.get('connected') and not row.get('error') for row in rows) else 'check_server_ok'
             self.task(check)
         elif action == 'open':
             self.open(data['target'])

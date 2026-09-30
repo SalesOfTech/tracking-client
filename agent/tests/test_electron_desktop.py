@@ -12,6 +12,21 @@ from agent_tracker.electron_desktop import Controller, serve, validate
 
 
 class ElectronControllerTests(unittest.TestCase):
+    def test_successful_enrollment_is_not_failed_by_legacy_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client = Client(Path(directory))
+            try:
+                controller = Controller(client, install=Path(directory), code='a'*32, worker=Mock())
+                with patch.object(client, 'enroll'), patch('agent_tracker.legacy_migration.replace_current_user', side_effect=PermissionError()):
+                    controller.command('enroll', {'key': 'b'*64})
+                    controller.job.join(timeout=5)
+                self.assertFalse(controller.busy)
+                self.assertEqual(controller.error, '')
+                self.assertEqual(controller.message, 'legacy_cleanup_warning')
+                controller.worker.sync_requested.set.assert_called_once()
+            finally:
+                client.close()
+
     def test_installer_opens_only_the_installed_extension_not_its_guide_bundle(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
