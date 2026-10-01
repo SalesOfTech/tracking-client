@@ -39,7 +39,7 @@ class MacUninstallContractTests(unittest.TestCase):
         mac._check(SimpleNamespace(**info), 501, 1)
 
     def test_never_repairs_foreign_or_system_owner_permissions(self):
-        with patch.object(mac.os, 'fchmod', create=True) as chmod, patch.object(mac.os, 'fchflags', create=True) as flags:
+        with patch.object(mac.os, 'fchmod', create=True) as chmod, patch.object(mac, '_set_flags') as flags:
             with self.assertRaises(ValueError):
                 mac._check(SimpleNamespace(st_uid=0, st_dev=1), 501, 1)
             chmod.assert_not_called()
@@ -47,10 +47,25 @@ class MacUninstallContractTests(unittest.TestCase):
 
     def test_only_owner_mutable_flags_and_directory_bits_are_repaired(self):
         info = SimpleNamespace(st_mode=stat.S_IFDIR | 0o500, st_flags=mac.USER_FLAGS | 0x8000)
-        with patch.object(mac.os, 'fchmod', create=True) as chmod, patch.object(mac.os, 'fchflags', create=True) as flags:
+        with patch.object(mac.os, 'fchmod', create=True) as chmod, patch.object(mac, '_set_flags') as flags:
             mac._repair(42, info)
         flags.assert_called_once_with(42, 0x8000)
         chmod.assert_called_once_with(42, 0o700)
+
+    def test_darwin_flags_use_the_checked_descriptor_and_report_system_failure(self):
+        with patch.object(mac.ctypes, 'CDLL') as library:
+            function = library.return_value.fchflags
+            function.return_value = 0
+            mac._set_flags(42, 0x8000)
+            library.assert_called_once_with(None, use_errno=True)
+            function.assert_called_once_with(42, 0x8000)
+            self.assertEqual(function.argtypes, [mac.ctypes.c_int, mac.ctypes.c_uint])
+            self.assertEqual(function.restype, mac.ctypes.c_int)
+            function.return_value = -1
+            with patch.object(mac.ctypes, 'get_errno', return_value=1):
+                with self.assertRaises(OSError) as error:
+                    mac._set_flags(42, 0)
+            self.assertEqual(error.exception.errno, 1)
 
     def test_only_exact_registration_content_is_owned(self):
         root = Path('/Users/fixture/Library/Application Support/SOFT/TrackingV3/install')

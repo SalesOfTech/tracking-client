@@ -17,7 +17,7 @@ class UninstallerAPITests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        self.root = Path(temp.name) / 'install'
+        self.root = Path(temp.name).resolve() / 'install'
         self.root.mkdir()
         self.app = self.root / 'versions/1.2.3/app/SoftTrackingApp.exe'
         self.app.parent.mkdir(parents=True)

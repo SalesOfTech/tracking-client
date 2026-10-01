@@ -1,5 +1,6 @@
 """Deletion confined to the real account home, using no-follow directory handles."""
 from contextlib import contextmanager
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -81,10 +82,20 @@ def _unchanged(parent, name, before):
         raise ValueError('Removal target changed')
 
 
+def _set_flags(descriptor, flags):
+    # CPython exposes chflags, but not Darwin's descriptor-based fchflags.
+    function = ctypes.CDLL(None, use_errno=True).fchflags
+    function.argtypes = [ctypes.c_int, ctypes.c_uint]
+    function.restype = ctypes.c_int
+    if function(descriptor, flags) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+
+
 def _repair(descriptor, info):
     # Only the owner's mutable flags and directory mode, never a link target.
     if getattr(info, 'st_flags', 0) & USER_FLAGS:
-        os.fchflags(descriptor, info.st_flags & ~USER_FLAGS)
+        _set_flags(descriptor, info.st_flags & ~USER_FLAGS)
     if stat.S_ISDIR(info.st_mode) and info.st_mode & 0o700 != 0o700:
         os.fchmod(descriptor, stat.S_IMODE(info.st_mode) | 0o700)
 
