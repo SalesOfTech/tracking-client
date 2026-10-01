@@ -244,6 +244,39 @@ class BrowserEpochTests(unittest.TestCase):
             self.assertEqual(2, native_host.main('chrome-extension://wrong/', io.BytesIO(), output, arguments=[]))
             self.assertEqual(b'', output.getvalue())
 
+    def test_uninstall_tombstone_rejects_old_launcher_before_opening_state(self):
+        install = self.root / 'install'
+        install.mkdir()
+        (install / 'current.json').write_text('{"version":"3.4.2"}')
+        (install / 'uninstall-requested.json').write_text('{}')
+        with patch.dict('os.environ', SOFT_TRACKING_INSTALL=str(install)), \
+                patch.object(native_host, 'Client') as create:
+            self.assertEqual(1, native_host.main(native_host.ALLOWED_ORIGIN, io.BytesIO(), io.BytesIO(), arguments=[]))
+            create.assert_not_called()
+
+    def test_deleted_installation_cannot_be_recreated_by_delayed_native_launch(self):
+        install = self.root / 'deleted-install'
+        with patch.dict('os.environ', SOFT_TRACKING_INSTALL=str(install)), \
+                patch.object(native_host, 'Client') as create:
+            self.assertEqual(1, native_host.main(native_host.ALLOWED_ORIGIN, io.BytesIO(), io.BytesIO(), arguments=[]))
+            create.assert_not_called()
+        self.assertFalse(install.exists())
+
+    def test_uninstall_during_native_read_does_not_store_or_acknowledge_activity(self):
+        install = self.root / 'install'
+        install.mkdir()
+        (install / 'current.json').write_text('{"version":"3.4.2"}')
+        def incoming(_stream):
+            (install / 'uninstall-requested.json').write_text('{}')
+            return {'action': 'status'}
+        output = io.BytesIO()
+        with patch.dict('os.environ', SOFT_TRACKING_INSTALL=str(install)), \
+                patch.object(native_host, 'read_message', side_effect=incoming), \
+                patch.object(native_host, 'handle') as handle:
+            self.assertEqual(1, native_host.main(native_host.ALLOWED_ORIGIN, io.BytesIO(), output, self.client, arguments=[]))
+            handle.assert_not_called()
+        self.assertEqual(b'', output.getvalue())
+
     def test_firefox_main_status_framing_and_untagged_switch_error_are_safe(self):
         request = io.BytesIO()
         native_host.write_message(request, {'action': 'status'})

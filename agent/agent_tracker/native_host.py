@@ -7,7 +7,7 @@ import re
 import struct
 import sys
 
-from .core.client import Client
+from .core.client import Client, workspace
 
 
 HOST_NAME = "com.soft.tracking"
@@ -116,6 +116,13 @@ def handle(client, message):
 def main(origin: str, stdin=None, stdout=None, client=None, arguments=None) -> int:
     if not authorized_caller(origin, sys.argv[2:] if arguments is None else arguments):
         return 2
+    install = os.environ.get('SOFT_TRACKING_INSTALL')
+    root = Path(install) if install else workspace() / 'install'
+    def removing():
+        return (root / 'uninstall-requested.json').exists() or bool(install and not (root / 'current.json').is_file())
+    # Retained old launchers may not understand the uninstall tombstone.
+    if removing():
+        return 1
     if os.name == "nt" and stdin is None:
         import msvcrt
         msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
@@ -130,6 +137,8 @@ def main(origin: str, stdin=None, stdout=None, client=None, arguments=None) -> i
                 message = read_message(stdin)
                 if message is None:
                     break
+                if removing():
+                    return 1
                 write_message(stdout, handle(client, message))
             except (ValueError, OSError, EOFError) as error:
                 client.state.set("error", "Browser collection stopped: local delivery failure")

@@ -110,6 +110,16 @@ def main(bundle):
         browser_payload=json.dumps({'action':'status','browser':{'profile':'b'*32,'family':'Chrome','version':json.loads((root/'extension/manifest.json').read_text())['version']}}).encode()
         reply=run_frozen([str(host),ALLOWED_ORIGIN],input=struct.pack('=I',len(browser_payload))+browser_payload,env=env,timeout=45)
         assert reply.returncode==0 and json.loads(reply.stdout[4:])['ok'], 'Frozen browser health receipt failed'
+        if Version(version) >= Version('3.4.2'):
+            marker = root / 'uninstall-requested.json'
+            atomic_json(marker, {'state': 'uninstall_requested'})
+            try:
+                # Exercise the current payload directly, as an old retained launcher would.
+                blocked = run_frozen([str(app.parent / executable_name(True)), ALLOWED_ORIGIN],
+                                     input=struct.pack('=I', len(payload)) + payload, env=env, timeout=45)
+                assert blocked.returncode == 1 and not blocked.stdout, 'Native host accepted activity during removal'
+            finally:
+                marker.unlink(missing_ok=True)
         launcher=subprocess.Popen([str(root/executable_name(False,True)),'--autostart'],env=env,
                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
         try:
