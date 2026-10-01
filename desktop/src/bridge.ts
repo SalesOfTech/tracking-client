@@ -15,6 +15,7 @@ export type View = {
   browsers?: {family: string; version: string; connected: boolean; error?: string; last_seen: number}[];
   domains?: string[]; programs?: string[]; policy?: Record<string, boolean>; update?: string;
   updateCheckedAt?: number; updateAvailable?: boolean; updateChecking?: boolean;
+  canManage?: boolean; canUninstall?: boolean; uninstalling?: boolean;
   admin?: {admin_required: boolean; force_kill_protected: boolean; authorization?: {available: boolean; mechanism: string}; autostart?: {registered: boolean | null; effective: string}};
 };
 export type CopyAcknowledgement = {copied: true};
@@ -43,7 +44,8 @@ let preview: View = {
   updateAvailable: params.get('mode') !== 'installer' && params.get('enroll') !== '1' && params.get('updateAvailable') !== '0',
   updateChecking: params.has('updateChecking') ? params.get('updateChecking') === '1' : params.get('update') === 'checking',
   updateCheckedAt: params.get('updateCheckedAt') === 'none' ? undefined : now - 60,
-  admin: {admin_required: true, force_kill_protected: false, autostart: {registered: true, effective: 'enabled'}},
+  canManage: false, canUninstall: false,
+  admin: {admin_required: false, force_kill_protected: false, autostart: {registered: true, effective: 'enabled'}},
 };
 if (!['ru', 'en', 'cs', 'uz'].includes(preview.language)) preview.language = 'en';
 if (['checking', 'active', 'installed', 'downloading', 'rolled_back', 'error', 'registration'].includes(params.get('update') || '')) preview.update = params.get('update')!;
@@ -87,7 +89,7 @@ export async function invoke(action: string, input: Record<string, unknown> = {}
     if (!/^[a-f0-9]{64}$/.test(String(input.key))) throw Error('invalid_request');
     preview = {...preview, employee: 'Demo colleague', message: 'employee_changed', receipt: {}};
   }
-  if (action === 'stop-agent') preview = {...preview, message: 'stop_cancelled'};
+  if (action === 'stop-agent' || action === 'uninstall-agent') throw Error('invalid_request');
   if (action === 'install') {
     preview = {...preview, busy: true, phase: 'installing'};
     setTimeout(() => {preview = {...preview, busy: false, phase: 'complete'};}, 2000);

@@ -102,6 +102,8 @@ class ReleaseManager:
                     raise ValueError("Release download failed")
                 with archive.open("xb") as output:
                     for chunk in response.iter_content(1024 * 1024):
+                        if (self.root / 'uninstall-requested.json').exists():
+                            raise ValueError('Update cancelled for application removal')
                         size += len(chunk)
                         if size > min(manifest["size"], MAX_ARCHIVE_BYTES) or time.monotonic() - started > 600:
                             raise ValueError("Release download limit exceeded")

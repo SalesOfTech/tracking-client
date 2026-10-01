@@ -11,6 +11,7 @@ from ...browser_setup import BROWSER_FAMILIES, EXTENSION_PAGES, discover_browser
 from ...core.files import read_json
 from ...core.update_control import update_status, request_check
 from ...i18n import LANGUAGES, client_language
+from ...uninstaller import can_uninstall, launch_uninstaller
 
 
 class Bridge(QObject):
@@ -31,6 +32,7 @@ class Bridge(QObject):
         self.message = ''
         self.copied_browser = ''
         self.job = None
+        self.uninstaller = None
         self._view = {}
         self.completed.connect(self.finish)
         self.timer = QTimer(self)
@@ -44,6 +46,11 @@ class Bridge(QObject):
 
     @Slot()
     def refresh(self):
+        if self.uninstaller is not None:
+            result = self.uninstaller.poll()
+            if result is not None:
+                self.uninstaller = None
+                self.message = 'uninstall_cancelled' if result == 2 else 'uninstall_requested' if result == 0 else 'uninstall_failed'
         status = self.client.status()
         policy = status['policy']
         identity = status['identity'] or {}
@@ -71,13 +78,15 @@ class Bridge(QObject):
             guide=self._guides.get(self.language) or self._guides.get('en') or
                   dict(intro=labels['guide_unavailable'], note='', sections=[]),
             admin=self.admin.status(), canManage=bool(self.worker) and not self.preview,
+            canUninstall=bool(self.worker and not self.preview and self.install and can_uninstall(self.install)),
+            uninstalling=self.uninstaller is not None,
             browserSetup=[dict(row, address=EXTENSION_PAGES[row['family']],
                                instruction=labels['browser_paste_address'].format(browser=row['family']))
                           for row in browser_setup if row.get('family') in EXTENSION_PAGES],
             languageIndex=list(LANGUAGES).index(self.language), version=status['version'],
             company=identity.get('company_name') or self.profile.get('company_name') or labels['company_installer'],
             employee=identity.get('user_name') or labels['not_connected'], enrolled=bool(identity),
-            code=self.company_code, needsCode=not bool(self.company_code), busy=self.busy,
+            code=self.company_code, needsCode=not bool(self.company_code), busy=self.busy or self.uninstaller is not None,
             message=message,
             browserMessage=message if self.message in ('browser_address_copied', 'browser_copy_failed') else '',
             copiedBrowser=self.copied_browser if self.message in ('browser_address_copied', 'browser_copy_failed') else '',
@@ -114,7 +123,7 @@ class Bridge(QObject):
             self.refresh()
 
     def task(self, function):
-        if self.busy:
+        if self.busy or self.uninstaller is not None:
             return
         self.busy, self.message = True, 'checking'
         self.refresh()
@@ -174,7 +183,7 @@ class Bridge(QObject):
 
     @Slot()
     def requestStop(self):
-        if self.preview or not self.worker or self.busy:
+        if self.preview or not self.worker or self.busy or self.uninstaller is not None:
             return
         def stop():
             try:
@@ -193,6 +202,19 @@ class Bridge(QObject):
             state = result.get('state')
             return 'stop_' + state if state in ('cancelled', 'denied', 'timed_out', 'unavailable', 'busy') else 'stop_error'
         self.task(stop)
+
+    @Slot()
+    def requestUninstall(self):
+        if (self.preview or not self.worker or self.busy or self.uninstaller is not None
+                or not self.install or not can_uninstall(self.install)):
+            return
+        def remove():
+            try:
+                self.uninstaller = launch_uninstaller(self.install)
+            except Exception:
+                return 'uninstall_failed'
+            return 'uninstall_requested'
+        self.task(remove)
 
     @Slot()
     def check(self):

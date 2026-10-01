@@ -141,6 +141,24 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(archive.read_bytes(),manager.download(checked).read_bytes())
         manifest['size']=1
         with self.assertRaises(ValueError):manager.download(manifest)
+
+    def test_removal_cancels_download_without_touching_active_release_or_queue(self):
+        archive, manifest, _ = self.package()
+        root = self.root
+        class RemovingResponse(Response):
+            def iter_content(self, size):
+                atomic_json(root / 'uninstall-requested.json', {'state': 'uninstall_requested'})
+                yield self.raw
+        class Session:
+            def get(self, url, **kwargs):
+                return RemovingResponse(archive.read_bytes())
+        manager = ReleaseManager(root, Session())
+        with self.assertRaisesRegex(ValueError, 'cancelled for application removal'):
+            manager.download(manifest)
+        self.assertEqual([], list((root / 'downloads').iterdir()))
+        self.assertEqual('3.0.0', manager.active()['version'])
+        self.assertEqual('must survive', (root / 'outbox-sentinel').read_text())
+
     def installer_fixture(self):
         archive,manifest,envelope=self.package()
         bundle=Path(self.tmp.name)/'setup';bundle.mkdir()

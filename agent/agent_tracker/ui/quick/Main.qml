@@ -75,7 +75,7 @@ ApplicationWindow {
                 Layout.bottomMargin: 16
                 spacing: 16
                 Label { text: [labels.connection,labels.browsers,labels.settings,labels.guide][window.page]; color: window.colors.text; font.pixelSize: 26; font.weight: Font.Bold; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                LanguagePicker { Layout.preferredWidth: 142; Layout.minimumWidth: 142; Layout.alignment: Qt.AlignVCenter }
+                LanguagePicker { enabled: !window.vm.uninstalling; Layout.preferredWidth: 142; Layout.minimumWidth: 142; Layout.alignment: Qt.AlignVCenter }
             }
             ScrollView {
                 id: scroll
@@ -170,7 +170,9 @@ ApplicationWindow {
                         Label { text: labels.administration; font.pixelSize: 16; font.weight: Font.DemiBold; color: window.colors.text; Layout.fillWidth: true; wrapMode: Text.Wrap }
                         Label { text: labels.per_user_notice; color: window.colors.muted; Layout.fillWidth: true; wrapMode: Text.Wrap }
                         Label { text: labels.user_autostart + ": " + (window.vm.admin.autostart.error ? labels.status_unknown : window.vm.admin.autostart.registered === true ? labels.autostart_registered : window.vm.admin.autostart.registered === false ? labels.autostart_missing : labels.status_unknown); color: window.colors.muted; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                        ActionButton { objectName: "stopAgent"; text: labels.stop_agent; glyph: "Settings"; enabled: window.vm.canManage && !window.vm.busy; onClicked: bridge.requestStop(); Layout.fillWidth: true }
+                        ActionButton { objectName: "stopAgent"; text: labels.stop_agent; enabled: window.vm.canManage && !window.vm.busy; onClicked: stopDialog.open(); Layout.fillWidth: true }
+                        ActionButton { objectName: "uninstallAgent"; visible: window.vm.canUninstall === true; text: window.vm.uninstalling ? labels.uninstall_opening : labels.uninstall_agent; enabled: window.vm.canManage && !window.vm.busy && !window.vm.uninstalling; onClicked: bridge.requestUninstall(); Layout.fillWidth: true }
+                        Label { objectName: "uninstallStatus"; visible: window.vm.uninstalling === true; text: labels.uninstall_started; color: window.colors.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; Accessible.role: Accessible.AlertMessage }
                     }
                     Guide { visible: window.page === 3; Layout.fillWidth: true; Layout.leftMargin: 28; Layout.rightMargin: 28; Layout.bottomMargin: 28 }
                     Label { visible: window.page !== 3 && (window.vm.error !== "" || (window.vm.message !== "" && (window.page !== 1 || window.vm.browserMessage === ""))); text: window.vm.error || window.vm.message; color: window.colors.warning; font.pixelSize: 13; Layout.fillWidth: true; Layout.margins: 28; Layout.topMargin: 10; wrapMode: Text.Wrap }
@@ -191,8 +193,29 @@ ApplicationWindow {
                     BusyIndicator { objectName: "updateProgress"; anchors.fill: parent; running: window.vm.updateBusy; visible: running }
                 }
                 Label { objectName: "updateStatus"; text: labels.auto_update + " · " + window.vm.updateLabel; color: window.colors.muted; font.pixelSize: 12; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                ActionButton { objectName: "checkUpdates"; text: window.vm.updateBusy ? labels.checking : labels.check_updates; glyph: "RefreshCw"; hint: window.vm.updateCheckedAt ? labels.update_last_checked + ": " + window.vm.updateCheckedAt : ""; enabled: window.vm.canCheckUpdate; onClicked: bridge.checkUpdates(); Layout.preferredWidth: 190; Layout.minimumWidth: 190; Layout.maximumWidth: 190 }
+                ActionButton { objectName: "checkUpdates"; text: window.vm.updateBusy ? labels.checking : labels.check_updates; glyph: "RefreshCw"; hint: window.vm.updateCheckedAt ? labels.update_last_checked + ": " + window.vm.updateCheckedAt : ""; enabled: window.vm.canCheckUpdate && !window.vm.uninstalling; onClicked: bridge.checkUpdates(); Layout.preferredWidth: 190; Layout.minimumWidth: 190; Layout.maximumWidth: 190 }
                 Label { text: window.vm.version; color: window.colors.muted; font.pixelSize: 12 }
+            }
+        }
+    }
+    Dialog {
+        id: stopDialog
+        objectName: "stopDialog"
+        parent: Overlay.overlay
+        title: labels.stop_title
+        modal: true
+        width: Math.min(520, window.width - 64)
+        x: (parent.width - width) / 2
+        y: Math.max(16, (parent.height - height) / 2)
+        onOpened: cancelStop.forceActiveFocus()
+        contentItem: ColumnLayout {
+            spacing: 16
+            Label { text: labels.stop_notice; color: window.colors.muted; textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                ActionButton { id: cancelStop; objectName: "cancelStop"; text: labels.cancel_action; onClicked: stopDialog.close(); Layout.fillWidth: true }
+                ActionButton { objectName: "confirmStop"; text: labels.stop_confirm; primary: true; enabled: window.vm.canManage && !window.vm.busy; onClicked: { stopDialog.close(); bridge.requestStop(); } Layout.fillWidth: true }
             }
         }
     }

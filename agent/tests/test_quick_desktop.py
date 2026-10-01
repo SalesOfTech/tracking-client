@@ -104,6 +104,41 @@ class QuickActionTests(unittest.TestCase):
         self.assertNotEqual(threading.get_ident(), calls[0])
         self.assertEqual('employee_changed', self.bridge.message)
 
+    def test_uninstall_is_async_and_cancellation_keeps_worker_running(self):
+        self.bridge.install = Path(self.temporary.name) / 'install'
+        child = Mock()
+        child.poll.return_value = None
+        with patch('agent_tracker.ui.quick.bridge.can_uninstall', return_value=True), \
+                patch('agent_tracker.ui.quick.bridge.launch_uninstaller', return_value=child) as launch:
+            self.bridge.requestUninstall()
+            self.finish_job()
+            self.assertTrue(self.bridge.view['uninstalling'])
+            self.assertTrue(self.bridge.view['busy'])
+            self.bridge.requestUninstall()
+            self.bridge.requestStop()
+            launch.assert_called_once_with(self.bridge.install)
+            child.poll.return_value = 2
+            self.bridge.refresh()
+            self.assertFalse(self.bridge.view['uninstalling'])
+            self.assertEqual('uninstall_cancelled', self.bridge.message)
+        child.wait.assert_not_called()
+        self.worker.request_graceful_stop.assert_not_called()
+
+    def test_uninstall_is_unavailable_in_preview_or_unsupported_installation(self):
+        self.bridge.install = Path(self.temporary.name) / 'install'
+        with patch('agent_tracker.ui.quick.bridge.launch_uninstaller') as launch:
+            self.bridge.preview = True
+            with patch('agent_tracker.ui.quick.bridge.can_uninstall', return_value=True):
+                self.bridge.requestUninstall()
+                self.bridge.refresh()
+                self.assertFalse(self.bridge.view['canUninstall'])
+            self.bridge.preview = False
+            with patch('agent_tracker.ui.quick.bridge.can_uninstall', return_value=False):
+                self.bridge.requestUninstall()
+                self.bridge.refresh()
+                self.assertFalse(self.bridge.view['canUninstall'])
+            launch.assert_not_called()
+
     def test_switch_validation_and_blocked_browser_are_localized(self):
         self.bridge.switchEmployee('', 'invalid')
         self.worker.switch_employee.assert_not_called()

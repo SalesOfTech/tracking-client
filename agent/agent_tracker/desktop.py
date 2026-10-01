@@ -403,6 +403,10 @@ class Desktop:
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
+    from .uninstaller import dispatch_cli
+    uninstall_result = dispatch_cli(argv)
+    if uninstall_result is not None:
+        return uninstall_result
     if argv and argv[0].startswith("chrome-extension://"):
         from .native_host import main as host_main
         return host_main(argv[0])

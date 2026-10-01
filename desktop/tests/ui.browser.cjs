@@ -6,6 +6,7 @@ const path = require('node:path');
 const {chromium} = require('../../node_modules/playwright');
 const {verifyConnection, verifyInstallerMigration} = require('./connection.ui.cjs');
 const {verifyUpdates, verifyBrowserCopy} = require('./actions.ui.cjs');
+const {verifyControls} = require('./controls.ui.cjs');
 const root = path.resolve(__dirname, '../dist');
 
 (async () => {
@@ -25,6 +26,8 @@ const root = path.resolve(__dirname, '../dist');
   try {
     browser = await chromium.launch({headless: true, ignoreDefaultArgs: ['--hide-scrollbars']});
     await fs.mkdir(output, {recursive: true});
+    await verifyControls(browser, origin, output);
+    if (process.env.TRACKING_UI_FOCUS === 'lifecycle') return;
     await verifyConnection(browser, origin, output);
     await verifyUpdates(browser, origin, output);
     await verifyBrowserCopy(browser, origin, output);
@@ -79,9 +82,8 @@ const root = path.resolve(__dirname, '../dist');
     await page.getByText('Demo colleague', {exact: true}).waitFor();
     assert.equal(await page.locator('.employee-switch').count(), 0);
     await page.locator('.sidebar nav button').nth(2).click();
-    await page.getByRole('button', {name: 'Остановить агент', exact: true}).click();
-    await page.locator('.stop-confirmation').getByRole('button', {name: 'Остановить агент', exact: true}).click();
-    await page.getByRole('status').filter({hasText: 'Агент не остановлен'}).waitFor();
+    assert.equal(await page.getByRole('button', {name: 'Остановить агент', exact: true}).isDisabled(), true);
+    assert.equal(await page.locator('.remove-app').count(), 0);
     await page.setViewportSize({width: 560, height: 610});
     for (const language of ['en','ru','cs','uz']) {
       await page.goto(`${origin}/?preview=1&mode=installer&noCode=1&lang=${language}`);

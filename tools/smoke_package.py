@@ -20,6 +20,27 @@ from smoke_helpers import (run_frozen, stop_tree, assert_ui_payload, assert_ui_h
                            child_processes, assert_electron_child, assert_children_stopped)
 
 
+def smoke_macos_uninstall(app, metadata, version, env):
+    if metadata['os'] != 'macos' or Version(version) < Version('3.4.2'):
+        return
+    result = run_frozen([str(app), '--uninstall-self-test'], env=env, timeout=60)
+    if result.returncode:
+        raise RuntimeError('Frozen isolated macOS uninstall smoke failed: ' + result.stderr.decode(errors='replace')[-8000:])
+    # The actual runtime is onedir. A separate onefile harness exercises the live
+    # bootloader-parent exemption against the pinned PyInstaller, not mocks.
+    from release import freeze
+    with tempfile.TemporaryDirectory(prefix='soft-uninstall-onefile-') as temporary:
+        folder = Path(temporary).resolve()
+        (folder / 'work').mkdir()
+        freeze('uninstall_smoke_entry.py', 'SoftTrackingUninstallSmoke', folder / 'dist', folder / 'work',
+               console=True, ui='electron')
+        executable = folder / 'dist/SoftTrackingUninstallSmoke'
+        result = run_frozen([str(executable), '--uninstall-self-test'],
+                            env=dict(env, PYINSTALLER_RESET_ENVIRONMENT='1'), timeout=90)
+        if result.returncode:
+            raise RuntimeError('Real onefile macOS uninstall smoke failed: ' + result.stderr.decode(errors='replace')[-8000:])
+
+
 def main(bundle):
     bundle = Path(bundle)
     metadata = json.loads((bundle/'setup-build.json').read_text(encoding='utf-8'))
@@ -45,6 +66,7 @@ def main(bundle):
         version=json.loads((root/'current.json').read_text())['version']
         app=release_path(root,version)/'app'/executable_name()
         assert_ui_payload(app.parent, metadata, bundle)
+        smoke_macos_uninstall(app, metadata, version, env)
         result=run_frozen([str(app),'--health-check'],env=env,timeout=60)
         if result.returncode!=0 or not health.exists():
             raise RuntimeError('Frozen application health check failed: '+result.stderr.decode(errors='replace'))

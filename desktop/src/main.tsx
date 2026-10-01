@@ -1,7 +1,7 @@
 import {lazy, Suspense, useEffect, useRef, useState, type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Button, Chip, Input, Label, ListBox, ProgressBar, ScrollShadow, Select, Spinner, TextField, Tooltip} from '@heroui/react';
-import {ArrowLeft, ArrowRight, Check, CheckCheck, CircleHelp, Clock3, Download, FolderOpen, Globe2, Link, Minus, Monitor, Play, RefreshCw, Settings2, ShieldCheck, X, AlertCircle, Building2, UserRound, UserRoundPen, Square, ChevronRight} from 'lucide-react';
+import {Button, Chip, Input, Label, ListBox, Modal, ProgressBar, ScrollShadow, Select, Spinner, TextField, Tooltip} from '@heroui/react';
+import {ArrowLeft, ArrowRight, Check, CheckCheck, CircleHelp, Clock3, Download, FolderOpen, Globe2, Link, Minus, Monitor, Play, RefreshCw, Settings2, ShieldCheck, X, AlertCircle, Building2, UserRound, UserRoundPen, Square, ChevronRight, Trash2} from 'lucide-react';
 import brand from '../../extension/icons/icon128.png';
 import {invoke, isPreview, nativeFrame, type View} from './bridge';
 import {languages, text, type Language, type Message} from './locale';
@@ -18,6 +18,8 @@ function App() {
   const [updateRequestPending, setUpdateRequestPending] = useState(false), [updateRequestFailed, setUpdateRequestFailed] = useState(false);
   const updateRequest = useRef(false);
   const [switching, setSwitching] = useState(false), [confirmStop, setConfirmStop] = useState(false);
+  const [controlPending, setControlPending] = useState(''), [controlError, setControlError] = useState<Message | null>(null);
+  const controlRequest = useRef(false);
   const started = useRef(false), autoInstalled = useRef(false), mounted = useRef(true);
   const language = view?.language || 'en', t = (id: Message) => text(language, id);
   useEffect(() => {
@@ -60,6 +62,12 @@ function App() {
   useEffect(() => {if (view?.message === 'employee_changed') {setSwitching(false); setKey('');}}, [view?.message]);
   async function act(action: string, input = {}) {
     if (action === 'copy-browser-page') {await invoke(action, input); return;}
+    if (view?.uninstalling || controlRequest.current) return;
+    const controlAction = action === 'stop-agent' || action === 'uninstall-agent';
+    if (controlAction) {
+      if (!view || isPreview || view.mode !== 'desktop' || localBusy || viewIsBusy(view) || view.uninstalling || controlRequest.current || view.canManage === false || (action === 'uninstall-agent' && view.canUninstall !== true)) return;
+      controlRequest.current = true; setControlPending(action); setControlError(null);
+    }
     if (action === 'check-update') {
       if (!view || updateRequest.current || updateState(view).disabled) return;
       updateRequest.current = true; setUpdateRequestPending(true); setUpdateRequestFailed(false);
@@ -73,18 +81,19 @@ function App() {
     }
     setLocalBusy(true); setLocalError(false);
     try {const state = await invoke(action, input); setView(state); setFailed(false); if (action === 'enroll') setKey('');}
-    catch {setLocalError(true);}
-    finally {setLocalBusy(false);}
+    catch {if (controlAction) setControlError(action === 'stop-agent' ? 'stopFailed' : 'uninstallFailed'); else setLocalError(true);}
+    finally {setLocalBusy(false); if (controlAction) {controlRequest.current = false; setControlPending('');}}
   }
-  const busy = localBusy || Boolean(view && viewIsBusy(view));
+  const busy = localBusy || Boolean(view && (viewIsBusy(view) || view.uninstalling));
   const date = (timestamp?: number) => timestamp ? new Date(timestamp * 1000).toLocaleString(language, {day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit'}) : '';
   const iconButton = (label: string, icon: ReactNode, fn: () => void, pressed?: boolean, disabled = false) => <Tooltip delay={300} isDisabled={disabled}><Tooltip.Trigger role="presentation" tabIndex={-1}><Button isIconOnly size="sm" variant={pressed ? 'secondary' : 'ghost'} aria-label={label} aria-pressed={pressed} isDisabled={disabled} onPress={fn}>{icon}</Button></Tooltip.Trigger><Tooltip.Content>{label}</Tooltip.Content></Tooltip>;
-  const languageControl = <Select aria-label={t('language')} value={language} onChange={value => void act('preferences', {language: value as Language})} className="language-select">
+  const languageControl = <Select aria-label={t('language')} value={language} isDisabled={Boolean(view?.uninstalling || controlPending)} onChange={value => void act('preferences', {language: value as Language})} className="language-select">
     <Select.Trigger><Globe2 size={15} aria-hidden="true"/><Select.Value/><Select.Indicator/></Select.Trigger>
     <Select.Popover><ListBox>{Object.entries(languages).map(([id, name]) => <ListBox.Item key={id} id={id} textValue={name}><Label>{name}</Label><ListBox.ItemIndicator/></ListBox.Item>)}</ListBox></Select.Popover>
   </Select>;
-  const actionErrors: Record<string, Message> = {setup_migration_failed: 'setupMigrationFailed', employee_switch_not_ready: 'switchBlocked', employee_switch_pending_activity: 'switchPending', stop_pending_activity: 'stopPending', browser_not_found: 'browserMissing', browser_open_failed: 'browserMissing'};
-  const errorCopy = failed || localError ? t('genericError') : view?.errorCode ? `${t('supportCode')}: ${view.errorCode}` : view?.error && actionErrors[view.error] ? t(actionErrors[view.error]) : view?.errorText || (view?.error ? t('genericError') : '');
+  const actionErrors: Record<string, Message> = {setup_migration_failed: 'setupMigrationFailed', employee_switch_not_ready: 'switchBlocked', employee_switch_pending_activity: 'switchPending', stop_pending_activity: 'stopPending', stop_error: 'stopFailed', stop_busy: 'controlBusy', uninstall_error: 'uninstallFailed', uninstall_failed: 'uninstallFailed', uninstall_unavailable: 'uninstallUnavailable', uninstall_busy: 'controlBusy', browser_not_found: 'browserMissing', browser_open_failed: 'browserMissing'};
+  const controlMessages: Record<string, Message> = {stop_authorized: 'stoppingAgent', stop_cancelled: 'stopCancelled', stop_busy: 'controlBusy', stop_error: 'stopFailed', stop_pending_activity: 'stopPending', uninstall_requested: 'uninstallRequested', uninstall_cancelled: 'uninstallCancelled', uninstall_failed: 'uninstallFailed', uninstall_unavailable: 'uninstallUnavailable', uninstall_busy: 'controlBusy'};
+  const errorCopy = controlError ? t(controlError) : failed || localError ? t('genericError') : view?.errorCode ? `${t('supportCode')}: ${view.errorCode}` : view?.error && actionErrors[view.error] ? t(actionErrors[view.error]) : view?.errorText || (view?.error ? t('genericError') : '');
   const error = errorCopy && <div className="notice error" role="alert"><AlertCircle size={18}/><span>{errorCopy}</span></div>;
   const titlebar = !nativeFrame && <header className="titlebar"><span><img src={brand} alt=""/>SOFT Tracking</span><div>{isPreview && <small>{t('preview')}</small>}{iconButton(t('minimize'), <Minus size={16}/>, () => void window.tracking?.window('minimize'))}{iconButton(t('close'), <X size={16}/>, () => void window.tracking?.window('close'))}</div></header>;
 
@@ -113,6 +122,8 @@ function App() {
   const status = connectionState(view, Boolean(busy), failed || localError);
   const hasReceipt = status.receipt === 'recent' || status.receipt === 'stale';
   const updates = updateState(view, updateRequestPending, updateRequestFailed);
+  const controlsDisabled = busy || isPreview || view.canManage === false;
+  const controlMessage = view.uninstalling ? t('uninstallStarted') : controlPending ? t(controlPending === 'stop-agent' ? 'stoppingAgent' : 'uninstallOpening') : controlMessages[view.message] ? t(controlMessages[view.message]) : '';
   return <div className="app-shell">{titlebar}<div className="workspace">
     <aside className="sidebar"><div className="brand"><img src={brand} alt=""/><strong>SOFT<br/>Tracking</strong></div>
       <nav>{([['connection', Link], ['browsers', Globe2], ['settings', Settings2]] as const).map(([id, Icon]) => <Button key={id} variant="ghost" aria-label={t(id)} aria-current={page === id ? 'page' : undefined} onPress={() => setPage(id)}><Icon size={19}/><span>{t(id)}</span></Button>)}</nav>
@@ -149,7 +160,16 @@ function App() {
       </>)}
       {page === 'browsers' && <><p className="muted section-intro">{t('browserNotice')}</p><p className="copy-instructions muted">{t('copyBrowserInstructions')}</p><div className="browser-list">{browsers.length ? browsers.map((row, index) => <div key={index} className="browser-row"><Globe2 size={25}/><div><strong>{row.family}</strong><p className="muted">{row.version} · {t('lastContact')}: {date(row.last_seen)}</p></div><span className={row.connected && !row.error ? 'success' : 'warning-text'}>{t(row.connected && !row.error ? 'connected' : 'waiting')}</span><BrowserPageButton family={row.family} language={language} onAction={act} compact/></div>) : <div className="empty-state">{t('noBrowsers')}</div>}</div><div className="actions"><Button onPress={() => void act('repair')} isDisabled={busy}><RefreshCw size={17}/>{t('repair')}</Button><Button variant="secondary" onPress={() => void act('open', {target: 'extension'})}><FolderOpen size={17}/>{t('extensionFolder')}</Button><Button variant="ghost" onPress={() => setPage('help')}>{t('help')}<ChevronRight size={16}/></Button></div></>}
       {page === 'help' && <Suspense fallback={<Spinner/>}><Guide language={language} busy={busy} onAction={act}/></Suspense>}
-      {page === 'settings' && <section className="settings-section"><div className="setting-row"><span>{t('autostart')}</span><span className={view.admin?.autostart?.registered ? 'success' : 'warning-text'}>{t(view.admin?.autostart?.registered ? 'on' : 'off')}</span></div><div className="agent-control"><Button variant="secondary" isDisabled={busy} onPress={() => setConfirmStop(true)}><ShieldCheck size={17}/>{t('stopAgent')}</Button><p className="muted">{t('stopNotice')}</p></div>{confirmStop && <div className="actions stop-confirmation"><Button isDisabled={busy} onPress={() => {setConfirmStop(false); void act('stop-agent');}}><Square size={16}/>{t('stopAgent')}</Button><Button variant="ghost" onPress={() => setConfirmStop(false)}>{t('cancel')}</Button></div>}{view.message.startsWith('stop_') && <p role="status" className="notice warning">{t('stopCancelled')}</p>}{view.admin && !view.admin.force_kill_protected && <p className="protection-note muted">{t('perUserProtection')}</p>}</section>}
+      {page === 'settings' && <section className="settings-section"><div className="setting-row"><span>{t('autostart')}</span><span className={view.admin?.autostart?.registered ? 'success' : 'warning-text'}>{t(view.admin?.autostart?.registered ? 'on' : 'off')}</span></div>
+        <div className="agent-control"><Button variant="secondary" aria-label={t('stopAgent')} isDisabled={controlsDisabled} onPress={() => setConfirmStop(true)}>{controlPending === 'stop-agent' ? <Spinner size="sm"/> : <Square size={17}/>}<span>{t('stopAgent')}</span></Button></div>
+        {view.canUninstall === true && <div className="agent-control"><Button variant="ghost" className="remove-app" aria-label={t('uninstallAgent')} isDisabled={controlsDisabled} onPress={() => void act('uninstall-agent', {})}>{controlPending === 'uninstall-agent' || view.uninstalling ? <Spinner size="sm"/> : <Trash2 size={17}/>}<span>{t('uninstallAgent')}</span></Button></div>}
+        {controlMessage && !errorCopy && <p role="status" className="action-message" aria-live="polite" aria-busy={Boolean(controlPending || view.uninstalling)}>{controlMessage}</p>}
+        <Modal isOpen={confirmStop} onOpenChange={setConfirmStop}><Modal.Backdrop><Modal.Container placement="center" size="sm"><Modal.Dialog className="stop-dialog" aria-describedby="stop-description">
+          <Modal.Header><Modal.Heading>{t('stopTitle')}</Modal.Heading></Modal.Header>
+          <Modal.Body><p id="stop-description" className="muted">{t('stopNotice')}</p></Modal.Body>
+          <Modal.Footer><Button autoFocus variant="secondary" onPress={() => setConfirmStop(false)}>{t('cancel')}</Button><Button isDisabled={controlsDisabled} onPress={() => {setConfirmStop(false); void act('stop-agent');}}><Square size={16}/><span>{t('stopConfirm')}</span></Button></Modal.Footer>
+        </Modal.Dialog></Modal.Container></Modal.Backdrop></Modal>
+      </section>}
       {page === 'settings' && <><section className="settings-section"><h3>{t('scope')}</h3><p className="muted section-intro">{t('scopeNotice')}</p>{([['webTime', 'tracking'], ['clicks', 'interactions'], ['fields', 'field_values'], ['inventory', 'app_inventory']] as [Message, string][]).map(([label, flag]) => <div key={flag} className="setting-row"><span>{t(label)}</span><span className={view.policy?.[flag] ? 'success' : 'muted'}>{t(view.policy?.[flag] ? 'on' : 'off')}</span></div>)}</section><section className="settings-section"><h3>{t('domains')}</h3>{view.domains?.length ? <ul className="scope-list">{view.domains.map(domain => <li key={domain}><Globe2 size={15}/>{domain}</li>)}</ul> : <p className="muted">{t('empty')}</p>}<h3>{t('programs')}</h3>{view.programs?.length ? <ul className="scope-list">{view.programs.map(program => <li key={program}><Monitor size={15}/>{program}</li>)}</ul> : <p className="muted">{t('empty')}</p>}</section><Button variant="secondary" onPress={() => void act('retry')} isDisabled={busy}><RefreshCw size={17}/>{t('retry')}</Button></>}
       </main>
     </ScrollShadow><footer className="status-footer">
@@ -158,7 +178,7 @@ function App() {
           <p className="update-summary">{t('update')}<span className="dot-separator">·</span><span className={updates.failed ? 'danger' : undefined}>{t(updates.label)}</span></p>
           {updates.checkedAt && <p className="update-checked">{t('updateCheckedAt')}: <time dateTime={new Date(updates.checkedAt * 1000).toISOString()}>{date(updates.checkedAt)}</time></p>}
         </div>
-        <Tooltip delay={300}><Tooltip.Trigger className="update-action" role="presentation" tabIndex={-1}><Button isIconOnly size="sm" variant="ghost" aria-label={t('checkUpdate')} isPending={updates.busy} isDisabled={updates.disabled} onPress={() => void act('check-update')}><RefreshCw size={17} className={updates.busy ? 'spin' : undefined}/></Button></Tooltip.Trigger><Tooltip.Content>{t(updates.disabled ? updates.label : 'checkUpdate')}</Tooltip.Content></Tooltip>
+        <Tooltip delay={300}><Tooltip.Trigger className="update-action" role="presentation" tabIndex={-1}><Button isIconOnly size="sm" variant="ghost" aria-label={t('checkUpdate')} isPending={updates.busy} isDisabled={updates.disabled || Boolean(view.uninstalling || controlPending)} onPress={() => void act('check-update')}><RefreshCw size={17} className={updates.busy ? 'spin' : undefined}/></Button></Tooltip.Trigger><Tooltip.Content>{t(updates.disabled ? updates.label : 'checkUpdate')}</Tooltip.Content></Tooltip>
       </div><span className="app-version">{view.version}</span>
     </footer></div>
   </div></div>;

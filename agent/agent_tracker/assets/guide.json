@@ -32,7 +32,8 @@
           "If Windows or macOS displays a publisher or security warning, ask your administrator to verify the installer source before approving this application. Keep antivirus, system protection and browser security enabled.",
           "On macOS, open Privacy & Security when Accessibility, Automation or screen information access is requested. Approve only SOFT Tracking and the permissions actually requested. OS permissions require your confirmation and cannot be granted silently.",
           "Desktop application tracking on Linux requires an X11 session. Wayland is not supported in this release. Ask your administrator which supported session to use.",
-          "To stop through the application, open Settings and select Stop agent (Stop with administrator approval in Qt). Approve the OS administrator request. If authorization is cancelled, denied or unavailable, collection continues. An authorized stop saves pending activity before exit. This per-user application is not protected against a force-quit by the same OS user. If current activity cannot be saved, the app remains open; check free disk space and try again."
+          "To stop the application, open Settings, select Stop agent and confirm Stop now. No administrator approval is required. The app closes and stops collecting activity until the next launch or sign-in. Pending activity is saved and sent after the next launch. If current activity cannot be saved, the app remains open; check free disk space and try again.",
+          "To uninstall this per-user installation, open Settings and select Remove app when available. Confirm or cancel once in the native uninstaller window; administrator approval is not required. Read its pending-data warning before confirming removal."
         ]
       },
       {
@@ -89,7 +90,8 @@
           "Если Windows или macOS показывает предупреждение об издателе или безопасности, попросите администратора проверить источник установщика перед разрешением запуска. Оставьте антивирус, защиту системы и браузера включёнными.",
           "В macOS откройте «Конфиденциальность и безопасность», если система запрашивает универсальный доступ, автоматизацию или сведения об экране. Разрешайте доступ только SOFT Tracking и только по фактическому запросу. Разрешения ОС требуют вашего подтверждения и не выдаются незаметно.",
           "Учёт активности приложений в Linux требует сеанса X11. Wayland в этом выпуске не поддерживается. Уточните у администратора, какой поддерживаемый сеанс использовать.",
-          "Для остановки через приложение откройте «Настройки» и нажмите «Остановить агент» («Остановить с подтверждением администратора» в Qt). Подтвердите системный запрос администратора. При отмене, отказе или недоступности подтверждения сбор продолжается. После разрешённой остановки ожидающая активность сохраняется до выхода. Приложение работает для одного пользователя и не защищено от принудительного завершения тем же пользователем ОС. Если текущую активность не удалось сохранить, приложение останется открытым: проверьте место на диске и повторите."
+          "Для остановки откройте «Настройки», нажмите «Остановить агент» и подтвердите «Остановить сейчас». Права администратора не нужны. Приложение закроется и прекратит сбор активности до следующего запуска или входа в систему. Неотправленная активность сохранится и будет отправлена после следующего запуска. Если текущую активность не удалось сохранить, приложение останется открытым: проверьте место на диске и повторите.",
+          "Чтобы удалить приложение из текущей учётной записи, откройте «Настройки» и нажмите «Удалить приложение», если кнопка доступна. Подтвердите или отмените удаление один раз в окне системной программы удаления; права администратора не нужны. Перед подтверждением прочитайте предупреждение о неотправленных данных."
         ]
       },
       {
@@ -146,7 +148,8 @@
           "Pokud Windows nebo macOS zobrazí varování o vydavateli či zabezpečení, požádejte správce o ověření zdroje instalátoru před schválením aplikace. Antivirus i ochranu systému a prohlížeče ponechte zapnuté.",
           "V macOS otevřete Soukromí a zabezpečení, pokud systém požaduje Zpřístupnění, Automatizaci nebo údaje o obrazovce. Schvalte jen SOFT Tracking a skutečně požadovaná oprávnění. Oprávnění OS vyžadují vaše potvrzení a nelze je udělit skrytě.",
           "Sledování aktivity aplikací v Linuxu vyžaduje relaci X11. Wayland není v tomto vydání podporován. O vhodné podporované relaci se poraďte se správcem.",
-          "Pro zastavení přes aplikaci otevřete Nastavení a zvolte Zastavit agenta (Zastavit se schválením správce v Qt). Potvrďte systémový požadavek na oprávnění správce. Při zrušení, zamítnutí nebo nedostupném schválení sběr pokračuje. Schválené zastavení uloží čekající aktivitu před ukončením. Tato aplikace pro jednoho uživatele není chráněna proti vynucenému ukončení stejným uživatelem OS. Pokud aktuální aktivitu nelze uložit, aplikace zůstane otevřená; zkontrolujte volné místo na disku a zkuste to znovu."
+          "Pro zastavení otevřete Nastavení, zvolte Zastavit agenta a potvrďte Zastavit nyní. Oprávnění správce není potřeba. Aplikace se zavře a přestane sbírat aktivitu do dalšího spuštění nebo přihlášení. Neodeslaná aktivita se uloží a odešle po příštím spuštění. Pokud aktuální aktivitu nelze uložit, aplikace zůstane otevřená; zkontrolujte volné místo na disku a zkuste to znovu.",
+          "Pro odebrání této uživatelské instalace otevřete Nastavení a zvolte Odinstalovat aplikaci, pokud je tlačítko dostupné. Odebrání jednou potvrďte nebo zrušte v okně nativního odinstalačního programu; oprávnění správce není potřeba. Před potvrzením si přečtěte upozornění na neodeslaná data."
         ]
       },
       {
@@ -203,7 +206,8 @@
           "Windows yoki macOS nashriyotchi yoki xavfsizlik haqida ogohlantirsa, ilovaga ruxsat berishdan oldin administratordan o'rnatish manbasini tekshirishni so'rang. Antivirus, tizim himoyasi va brauzer xavfsizligini yoqilgan holda qoldiring.",
           "macOS Accessibility, Automation yoki ekran ma'lumotlariga kirishni so'rasa, Privacy & Securityni oching. Faqat SOFT Tracking va haqiqatda so'ralgan ruxsatlarni tasdiqlang. OT ruxsatlari sizning tasdig'ingizni talab qiladi va yashirincha berilmaydi.",
           "Linuxda ilova faoliyatini kuzatish uchun X11 seansi kerak. Wayland bu relizda qo'llab-quvvatlanmaydi. Qaysi qo'llab-quvvatlanadigan seansdan foydalanishni administratordan so'rang.",
-          "Ilova orqali to'xtatish uchun Sozlamalarni oching va Agentni to'xtatishni (Qt interfeysida Administrator tasdig'i bilan to'xtatish) bosing. OT administrator so'rovini tasdiqlang. Tasdiq bekor qilinsa, rad etilsa yoki mavjud bo'lmasa, yig'ish davom etadi. Ruxsat berilgan to'xtatish chiqishdan oldin kutilayotgan faoliyatni saqlaydi. Bu bir foydalanuvchili ilova shu OT foydalanuvchisi tomonidan majburan yopilishdan himoyalanmagan. Joriy faoliyat saqlanmasa, ilova ochiq qoladi; diskdagi bo'sh joyni tekshiring va qayta urining."
+          "Ilovani to'xtatish uchun Sozlamalarni oching, Agentni to'xtatishni bosing va Hozir to'xtatishni tasdiqlang. Administrator ruxsati kerak emas. Ilova yopiladi va keyingi ishga tushirish yoki tizimga kirishgacha faoliyatni yig'maydi. Yuborilmagan faoliyat saqlanadi va keyingi ishga tushirishdan so'ng yuboriladi. Joriy faoliyat saqlanmasa, ilova ochiq qoladi; diskdagi bo'sh joyni tekshiring va qayta urining.",
+          "Joriy foydalanuvchi uchun o'rnatilgan ilovani o'chirish uchun Sozlamalarni oching va mavjud bo'lsa Ilovani o'chirishni bosing. Tizimning o'chirish dasturi oynasida bir marta tasdiqlang yoki bekor qiling; administrator ruxsati kerak emas. Tasdiqlashdan oldin yuborilmagan ma'lumotlar haqidagi ogohlantirishni o'qing."
         ]
       },
       {

@@ -1,4 +1,4 @@
-"""Current-user Windows removal. Never infer server completion from a request."""
+"""Current-user removal. Never infer server completion from a request."""
 from __future__ import annotations
 
 import base64
@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import stat
 import subprocess
+import sys
 import threading
 
 from .core.files import atomic_json, read_json
@@ -24,6 +25,16 @@ def language(root):
     import sqlite3
     from contextlib import closing
     saved = ''
+    if sys.platform == 'darwin':
+        from .macos_uninstall import current_user, _check
+        try:
+            _, uid = current_user()
+            for path in (Path(root).parent / 'state.sqlite3', Path(root) / 'enrollment.json'):
+                reject_reparse(path)
+                if path.exists():
+                    _check(path.lstat(), uid)
+        except (OSError, ValueError):
+            return client_language('', {})
     try:
         with closing(sqlite3.connect((Path(root).parent / 'state.sqlite3').as_uri() + '?mode=ro', uri=True, timeout=1)) as db:
             row = db.execute("SELECT value FROM state WHERE name='language'").fetchone()
@@ -53,8 +64,11 @@ def reject_reparse(path):
 
 
 def owned_root(root):
+    if sys.platform == 'darwin':
+        from .macos_uninstall import owned_root as mac_root
+        return mac_root(root)
     if os.name != 'nt':
-        raise OSError('Windows per-user uninstall only')
+        raise OSError('Unsupported uninstall platform')
     expected = known_folder(28) / 'SOFT' / 'TrackingV3' / 'install'
     root = Path(root).absolute()
     reject_reparse(root)
@@ -62,6 +76,112 @@ def owned_root(root):
     if root != expected or root.resolve() != expected.resolve():
         raise ValueError('Not the current-user SOFT Tracking installation')
     return root
+
+
+def active_executable(root):
+    from .bootstrap import app_path
+    # Reject aliases before app_path resolves them, including current.json itself.
+    reject_reparse(root / 'current.json')
+    version = read_json(root / 'current.json', {}).get('version')
+    executable = app_path(root)
+    expected = root / 'versions' / version / 'app' / executable.name
+    reject_reparse(expected)
+    if executable != expected or not executable.is_file():
+        raise ValueError('Invalid active application')
+    if sys.platform == 'darwin':
+        from .macos_uninstall import current_user, _directory, _check
+        home, uid = current_user()
+        with _directory(home, executable.parent, uid):
+            _check(executable.lstat(), uid)
+        _check((root / 'current.json').lstat(), uid)
+        if not os.access(executable, os.X_OK):
+            raise ValueError('Active application is not executable')
+    return executable
+
+
+def can_uninstall(root):
+    """Cheap, read-only eligibility check, not a guarantee of OS deletion permission."""
+    if root is None or (os.name != 'nt' and sys.platform != 'darwin'):
+        return False
+    try:
+        root = owned_root(root)
+        active_executable(root)
+        return not (root / MARKER).exists()
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+
+
+def launch_uninstaller(root):
+    """Return immediately; child exit: 2 cancelled, 1 failed, 0 completed/scheduled.
+
+    Windows success schedules deferred cleanup; it does not prove deletion.
+    The UI must not confirm again, wait(), or close itself before confirmation.
+    """
+    try:
+        root = owned_root(root)
+        executable = active_executable(root)
+        if (root / MARKER).exists():
+            raise ValueError('Already uninstalling')
+        options = {'creationflags': subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS} if os.name == 'nt' else {'start_new_session': True}
+        return subprocess.Popen([str(executable), '--uninstall', '--installed-root', str(root)],
+                                cwd=str(root.parent), stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                env=uninstall_environment(root), **options)
+    except (OSError, ValueError, TypeError, KeyError):
+        # Renderers receive a fixed translation key, never OS errors or local paths.
+        raise ValueError('uninstall_failed') from None
+
+
+def dispatch_cli(argv):
+    """None means ordinary startup. Run before any GUI import or instance lock."""
+    if argv == ['--uninstall-self-test']:
+        from .uninstaller_smoke import run
+        return run()
+    if '--uninstall' not in argv and '--uninstall-notify' not in argv:
+        return None
+    import argparse
+    parser = argparse.ArgumentParser()
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--uninstall', action='store_true')
+    mode.add_argument('--uninstall-notify', action='store_true')
+    parser.add_argument('--installed-root', required=True)
+    args = parser.parse_args(argv)
+    if args.uninstall_notify:
+        try:
+            root = owned_root(Path(args.installed_root))
+            if sys.platform != 'darwin' or read_json(root / MARKER, {}).get('state') != 'uninstall_requested':
+                return 1
+            from .macos_uninstall import validate_tree as validate_mac_tree
+            validate_mac_tree(root.parent)
+            notify_requested(root)
+            return 0
+        except Exception:
+            return 1
+    return main(Path(args.installed_root), cancel_code=2)
+
+
+def uninstall_environment(root, independent=True):
+    env = dict(os.environ, SOFT_TRACKING_INSTALL=str(root))
+    for key in ('SOFT_TRACKING_HEALTH', 'SOFT_TRACKING_RUN_TOKEN'):
+        env.pop(key, None)
+    if independent:
+        # A detached onefile uninstaller must outlive the UI's extraction directory.
+        env['PYINSTALLER_RESET_ENVIRONMENT'] = '1'
+    else:
+        env.pop('PYINSTALLER_RESET_ENVIRONMENT', None)
+    return env
+
+
+def notify_isolated(root):
+    """A timed-out delivery worker must be gone before macOS deletes its database."""
+    child = subprocess.Popen([str(active_executable(root)), '--uninstall-notify', '--installed-root', str(root)],
+                             env=uninstall_environment(root, independent=False), stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    try:
+        child.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        child.kill()
+        child.wait(timeout=5)
 
 
 def validate_tree(root):
@@ -254,21 +374,51 @@ def start_helper(root):
 
 def confirm_removal(root):
     locale = language(root)
+    if sys.platform == 'darwin':
+        from .macos_uninstall import dialog
+        return dialog(translate(locale, 'uninstall_title'),
+                      translate(locale, 'uninstall_confirm') + '\n\n' + translate(locale, 'uninstall_flush_warning'),
+                      translate(locale, 'uninstall_cancel'), translate(locale, 'uninstall_remove'))
     return ctypes.windll.user32.MessageBoxW(None,
         translate(locale, 'uninstall_confirm') + '\n\n' + translate(locale, 'uninstall_flush_warning'),
         translate(locale, 'uninstall_title'),
         0x4 | 0x30 | 0x100) == 6
 
 
-def uninstall(root, confirm=None, lifecycle_hook=None):
-    """Return 0 when cleanup was scheduled, NOT when deletion was completed.
+def uninstall(root, confirm=None, lifecycle_hook=None, cancel_code=0):
+    """Return 0 on macOS completion or Windows scheduling, 1 via main on failure.
 
+    Legacy bootstrap callers retain cancel=0; the new active-app CLI uses 2.
     lifecycle_hook(root) may replace bounded best-effort lifecycle delivery.
     It must describe uninstall_requested only, never confirmed removal.
     """
     from .installer import stopped_supervisor
     root = owned_root(root)
     if not (confirm() if confirm else confirm_removal(root)):
+        return cancel_code
+    if sys.platform == 'darwin':
+        from . import macos_uninstall as mac
+        mac.prepare(root)
+        with SingleInstance(root / 'install.lock'):
+            atomic_json(root / MARKER, {'state': 'uninstall_requested'})
+            removing = False
+            try:
+                with stopped_supervisor(root), SingleInstance(root.parent / 'agent.lock'):
+                    mac.stop_native_hosts(root)
+                    try:
+                        (lifecycle_hook or notify_isolated)(root)
+                    except Exception:
+                        pass
+                    # Includes delivery workers that failed to exit after their deadline.
+                    mac.stop_native_hosts(root)
+                    removing = True
+                    mac.remove_registrations(root)
+                    mac.cleanup(root)
+            except Exception:
+                # Keep the tombstone after partial removal to prevent a broken restart.
+                if not removing:
+                    (root / MARKER).unlink(missing_ok=True)
+                raise
         return 0
     validate_tree(root.parent)
     with SingleInstance(root / 'install.lock'):
@@ -287,12 +437,22 @@ def uninstall(root, confirm=None, lifecycle_hook=None):
     return 0
 
 
-def main(root):
+def main(root, cancel_code=0):
     try:
-        return uninstall(root)
+        return uninstall(root, cancel_code=cancel_code)
     except Exception:
-        if os.name == 'nt':
-            locale = language(root)
-            ctypes.windll.user32.MessageBoxW(None,
-                translate(locale, 'uninstall_failed'), translate(locale, 'uninstall_title'), 0x10)
+        try:
+            # Do not read locale files from a path whose ownership check failed.
+            locale = language(owned_root(root))
+        except Exception:
+            locale = client_language('', {})
+        try:
+            if sys.platform == 'darwin':
+                from .macos_uninstall import dialog
+                dialog(translate(locale, 'uninstall_title'), translate(locale, 'uninstall_failed'))
+            elif os.name == 'nt':
+                ctypes.windll.user32.MessageBoxW(None,
+                    translate(locale, 'uninstall_failed'), translate(locale, 'uninstall_title'), 0x10)
+        except Exception:
+            pass
         return 1

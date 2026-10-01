@@ -41,7 +41,7 @@ test('desktop browser-page controls only copy addresses and never use navigator.
   }
 });
 
-test('employee switch, admin stop and browser pages cannot supply arbitrary authority or URLs', () => {
+test('employee switch, stop and browser pages cannot supply arbitrary authority or URLs', () => {
   assert.equal(validate('switch-employee', {key: 'b'.repeat(64)}).action, 'switch-employee');
   for (const input of [{key: 'b'.repeat(64), code: 'c'.repeat(32)}, {key: 'wrong'}]) assert.throws(() => validate('switch-employee', input));
   assert.equal(validate('stop-agent').action, 'stop-agent');
@@ -49,6 +49,13 @@ test('employee switch, admin stop and browser pages cannot supply arbitrary auth
   for (const browser of ['Chrome', 'Edge', 'Yandex', 'Opera', 'Brave', 'Vivaldi', 'Chromium', 'Firefox']) assert.equal(validate('browser-page', {browser}).input.browser, browser);
   for (const input of [{browser: 'Chrome', url: 'file:///etc/passwd'}, {browser: 'cmd.exe'}, {browser: 'chrome://extensions'}]) assert.throws(() => validate('browser-page', input));
   for (const theme of ['system', 'light', 'dark']) assert.throws(() => validate('preferences', {language: 'ru', theme}));
+});
+
+test('uninstall command cannot select a path, user, command or elevated mode', () => {
+  assert.deepEqual(validate('uninstall-agent'), {action: 'uninstall-agent', input: {}});
+  for (const input of [{root: '/Applications'}, {user: 'another'}, {command: 'rm'}, {elevated: true}, {confirmed: true}, null, []]) {
+    assert.throws(() => validate('uninstall-agent', input), /invalid_request/);
+  }
 });
 
 function sourceModule(filename, globals = {}) {

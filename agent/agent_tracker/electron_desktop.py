@@ -24,6 +24,7 @@ from .core.update_control import request_check, update_status
 from .electron_links import restore_links
 from .i18n import LANGUAGES, client_language, detect_language, translate
 from .runtime import Worker
+from .uninstaller import can_uninstall, launch_uninstaller
 
 MAX_MESSAGE = 8192
 
@@ -43,7 +44,7 @@ def available():
 
 
 def validate(action, data):
-    fields = {'status': (), 'enroll': ('code', 'key'), 'switch-employee': ('key',), 'stop-agent': (),
+    fields = {'status': (), 'enroll': ('code', 'key'), 'switch-employee': ('key',), 'stop-agent': (), 'uninstall-agent': (),
               'browser-page': ('browser',), 'check': (), 'check-update': (), 'repair': (), 'retry': (), 'resume': (),
               'open': ('target',), 'preferences': ('language',), 'install': ('code',),
               'launch': (), 'ready': ()}
@@ -75,6 +76,7 @@ class Controller:
         self.busy, self.error, self.message = False, '', ''
         self.error_code = ''
         self.job, self.launcher = None, None
+        self.uninstaller = None
         self.phase = 'waiting'
         self.migration_probed = False
         self.health, self.ready, self.exit_requested = health, False, False
@@ -82,13 +84,19 @@ class Controller:
         self.admin = AdminControl(install)
 
     def snapshot(self):
+        if self.uninstaller is not None:
+            result = self.uninstaller.poll()
+            if result is not None:
+                self.uninstaller = None
+                self.message = 'uninstall_cancelled' if result == 2 else 'uninstall_requested' if result == 0 else 'uninstall_failed'
         error = self.error
         try:
             error_text = translate(self.language, error) if error else ''
         except KeyError:
             error_text = translate(self.language, 'connect_failed')
         view = dict(mode=self.mode, language=self.language, theme=self.theme, code=self.code,
-                    busy=self.busy, error=error, errorText=error_text, errorCode=self.error_code, message=self.message, phase=self.phase)
+                    busy=self.busy or self.uninstaller is not None, uninstalling=self.uninstaller is not None,
+                    error=error, errorText=error_text, errorCode=self.error_code, message=self.message, phase=self.phase)
         if not self.client:
             view.update(version=read_json(self.bundle / 'setup-build.json', {}).get('version', ''), enrolled=False)
             return view
@@ -117,11 +125,13 @@ class Controller:
             updateAvailable=bool(identity and self.install and (self.install / 'current.json').is_file()
                                  and not (self.install / 'uninstall-requested.json').exists()),
             admin=self.admin.status(),
+            canUninstall=bool(self.worker and self.install and not self.health and not self.bundle
+                              and can_uninstall(self.install)),
         )
         return view
 
     def task(self, operation):
-        if self.busy or self.health:
+        if self.busy or self.health or self.uninstaller is not None:
             raise ValueError('busy')
         self.busy, self.error, self.message = True, '', ''
         self.error_code = ''
@@ -132,7 +142,7 @@ class Controller:
                 # Never expose request bodies, tokens, filesystem paths or server traces.
                 allowed = {'setup_code_required', 'setup_company_conflict', 'setup_company_unavailable',
                            'setup_existing_damaged', 'setup_upgrade_failed', 'setup_wrong_target', 'setup_close_required',
-                           'setup_migration_failed',
+                           'setup_migration_failed', 'uninstall_failed',
                            'employee_switch_not_ready', 'employee_switch_pending_activity', 'stop_pending_activity', 'browser_not_found', 'browser_open_failed'}
                 self.error = str(error) if str(error) in allowed else 'setup_failed' if self.bundle else 'connect_failed'
                 if self.client:
@@ -178,6 +188,8 @@ class Controller:
             return self.snapshot()
         if self.health:
             raise ValueError('invalid_request')
+        if self.uninstaller is not None:
+            raise ValueError('busy')
         if action == 'install' and self.bundle:
             if self.code and len(data['code']) == 32 and self.code != data['code']:
                 raise ValueError('setup_company_conflict')
@@ -243,6 +255,15 @@ class Controller:
                 else:
                     self.message = 'stop_' + result['state']
             self.task(stop_agent)
+        elif action == 'uninstall-agent' and self.client and self.worker and self.install and not self.bundle:
+            if not can_uninstall(self.install):
+                raise ValueError('invalid_request')
+            def remove():
+                try:
+                    self.uninstaller = launch_uninstaller(self.install)
+                except Exception as error:
+                    raise ValueError('uninstall_failed') from error
+            self.task(remove)
         elif action == 'check-update' and self.client and self.install and not self.bundle:
             if not self.client.state.get('identity'):
                 raise ValueError('invalid_request')

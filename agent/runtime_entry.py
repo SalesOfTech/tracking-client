@@ -3,6 +3,10 @@ import sys
 
 
 def run():
+    from agent_tracker.uninstaller import dispatch_cli
+    uninstall_result = dispatch_cli(sys.argv[1:])
+    if uninstall_result is not None:
+        return uninstall_result
     if "--supervisor" in sys.argv:
         import argparse
         from agent_tracker.supervisor import main

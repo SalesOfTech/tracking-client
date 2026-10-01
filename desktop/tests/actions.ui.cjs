@@ -36,20 +36,26 @@ async function assertLayout(page) {
   assert.equal(result.scrollbar, result.overflowing ? 12 : 0);
 }
 
-async function nativeFixture(page, language = 'en', mode = 'desktop') {
-  await page.clock.install();
+async function nativeFixture(page, language = 'en', mode = 'desktop', fakeClock = true) {
+  if (fakeClock) await page.clock.install();
   await page.addInitScript(({language, mode, pages}) => {
     const now = Date.now() / 1000;
     window.__commands = [];
     window.__clipboardReads = 0;
     Object.defineProperty(navigator, 'clipboard', {get() {window.__clipboardReads++; throw Error('browser_clipboard_forbidden');}});
     window.__state = {mode, language, theme: 'system', version: 'test', code: '', phase: 'waiting', busy: false, error: '', message: '', enrolled: true, company: 'Demo company', employee: 'Demo employee', collection: 'recording', pending: 0, rejected: 0,
-      update: 'active', updateAvailable: true, updateChecking: false, updateCheckedAt: now - 60,
+      update: 'active', updateAvailable: true, updateChecking: false, updateCheckedAt: now - 60, canManage: mode === 'desktop', canUninstall: mode === 'desktop', uninstalling: false,
       receipt: {hostname: 'demo.kommo.com', timestamp: now - 90, end_timestamp: now - 10, confirmed_at: now - 5},
       browsers: Object.keys(pages).map(family => ({family, connected: true, version: 'test', last_seen: now}))};
     window.tracking = {nativeFrame: false, window: async () => {}, invoke: async (action, input = {}) => {
       window.__commands.push({action, input});
       if (action === 'ready') return {};
+      if (action === 'stop-agent' || action === 'uninstall-agent') {
+        return new Promise((resolve, reject) => {
+          window.__finishControl = patch => {Object.assign(window.__state, patch); resolve(structuredClone(window.__state));};
+          window.__rejectControl = () => reject(Error('PRIVATE_CONTROL_ERROR C:\\Users\\private\\secret'));
+        });
+      }
       if (action === 'check-update') {
         const snapshot = structuredClone(window.__state);
         return new Promise((resolve, reject) => {
@@ -224,4 +230,4 @@ async function verifyBrowserCopy(browser, origin, output) {
   console.log('Browser copy UI: eight families, four languages, Guide/list/installer, confirmation timeout, failure/retry and no navigation passed');
 }
 
-module.exports = {verifyUpdates, verifyBrowserCopy};
+module.exports = {verifyUpdates, verifyBrowserCopy, nativeFixture};

@@ -1,5 +1,5 @@
 'use strict';
-const ACTIONS = new Set(['status', 'enroll', 'switch-employee', 'stop-agent', 'browser-page', 'copy-browser-page', 'check', 'check-update', 'repair', 'retry', 'resume', 'open', 'preferences', 'install', 'launch', 'ready']);
+const ACTIONS = new Set(['status', 'enroll', 'switch-employee', 'stop-agent', 'uninstall-agent', 'browser-page', 'copy-browser-page', 'check', 'check-update', 'repair', 'retry', 'resume', 'open', 'preferences', 'install', 'launch', 'ready']);
 const BROWSER_PAGES = Object.freeze({
   Chrome: 'chrome://extensions', Edge: 'edge://extensions', Yandex: 'browser://extensions',
   Opera: 'opera://extensions', Brave: 'brave://extensions', Vivaldi: 'vivaldi://extensions',

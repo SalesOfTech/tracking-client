@@ -14,6 +14,94 @@ from agent_tracker.electron_desktop import Controller, serve, validate
 
 
 class ElectronControllerTests(unittest.TestCase):
+    def test_uninstall_launches_once_without_waiting_or_stopping_before_confirmation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            client = Client(root)
+            try:
+                worker = Mock()
+                child = Mock()
+                child.poll.return_value = None
+                controller = Controller(client, install=root / 'install', worker=worker)
+                with patch('agent_tracker.electron_desktop.can_uninstall', return_value=True), \
+                        patch('agent_tracker.electron_desktop.launch_uninstaller', return_value=child) as launch:
+                    self.assertTrue(controller.snapshot()['canUninstall'])
+                    controller.command('uninstall-agent', {})
+                    controller.job.join(timeout=5)
+                    self.assertFalse(controller.job.is_alive())
+                    self.assertTrue(controller.snapshot()['uninstalling'])
+                    self.assertTrue(controller.snapshot()['busy'])
+                    for action in ('uninstall-agent', 'stop-agent'):
+                        with self.assertRaises(ValueError):
+                            controller.command(action, {})
+                    launch.assert_called_once_with(root / 'install')
+                    child.poll.return_value = 2
+                    view = controller.snapshot()
+                    self.assertFalse(view['uninstalling'])
+                    self.assertFalse(view['busy'])
+                    self.assertEqual(view['message'], 'uninstall_cancelled')
+                child.wait.assert_not_called()
+                worker.request_graceful_stop.assert_not_called()
+                self.assertFalse(controller.exit_requested)
+            finally:
+                client.close()
+
+    def test_uninstall_failed_child_reports_only_localized_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client = Client(Path(directory))
+            try:
+                controller = Controller(client, install=Path(directory), worker=Mock())
+                controller.uninstaller = Mock()
+                controller.uninstaller.poll.return_value = 1
+                view = controller.snapshot()
+                self.assertEqual(view['message'], 'uninstall_failed')
+                self.assertFalse(view['uninstalling'])
+                self.assertFalse(controller.exit_requested)
+            finally:
+                client.close()
+
+    def test_uninstall_rejects_foreign_paths_unsupported_and_non_desktop_modes(self):
+        for data in ({'root': '/'}, {'confirmed': True}, {'elevated': True}):
+            with self.assertRaises(ValueError):
+                validate('uninstall-agent', data)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            client = Client(root)
+            try:
+                controllers = [Controller(client), Controller(client, install=root),
+                               Controller(client, install=root, worker=Mock(), health=True),
+                               Controller(bundle=root)]
+                with patch('agent_tracker.electron_desktop.launch_uninstaller') as launch:
+                    for controller in controllers:
+                        with self.assertRaises(ValueError):
+                            controller.command('uninstall-agent', {})
+                    with patch('agent_tracker.electron_desktop.can_uninstall', return_value=False):
+                        controller = Controller(client, install=root, worker=Mock())
+                        self.assertFalse(controller.snapshot()['canUninstall'])
+                        with self.assertRaises(ValueError):
+                            controller.command('uninstall-agent', {})
+                    launch.assert_not_called()
+            finally:
+                client.close()
+
+    def test_current_user_stop_uses_checkpoint_without_elevation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client = Client(Path(directory))
+            try:
+                worker = Mock()
+                controller = Controller(client, worker=worker)
+                with patch('subprocess.run') as run, patch('subprocess.Popen') as spawn:
+                    controller.command('stop-agent', {})
+                    controller.job.join(timeout=5)
+                self.assertFalse(controller.busy)
+                self.assertTrue(controller.exit_requested)
+                self.assertFalse(controller.snapshot()['admin']['admin_required'])
+                worker.request_graceful_stop.assert_called_once_with()
+                run.assert_not_called()
+                spawn.assert_not_called()
+            finally:
+                client.close()
+
     def test_update_check_queues_only_for_an_enrolled_installed_desktop(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
