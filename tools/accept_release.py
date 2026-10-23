@@ -35,6 +35,7 @@ ENVIRONMENT = 'tracking-release-acceptance'
 SMOKE_STEP = 'All genuine published upgrades with all existing smoke assertions'
 MAX_BUNDLE = 2 * 1024 ** 3 - 1
 ASSET_HOST = 'release-assets.githubusercontent.com'
+PUBLIC_BASELINES = frozenset({'3.4.2', '3.4.0', '3.3.2', '3.3.0', '3.2.0'})
 STAGE = 'preflight'
 
 
@@ -87,7 +88,9 @@ def asset_url(value):
 
 def baseline_urls(raw):
     document = json_value(raw, 48 * 1024)
-    require(isinstance(document, dict) and set(document) == set(upgrade_baselines(VERSION)))
+    required = set(upgrade_baselines(VERSION))
+    # Accept the historical full map, but public slots never override asset pins.
+    require(isinstance(document, dict) and set(document) in (required - PUBLIC_BASELINES, required))
     targets = {row['target'] for row in TARGETS}
     for slots in document.values():
         require(isinstance(slots, dict) and set(slots) == targets)
@@ -95,6 +98,24 @@ def baseline_urls(raw):
             require(isinstance(slot, dict) and set(slot) == {'url'})
             asset_url(slot['url'])
     return document
+
+
+def download_baseline(api, version, target, pin, urls, destination):
+    require(isinstance(pin, list) and len(pin) == 2)
+    identifier, expected = pin
+    require(type(identifier) is int and identifier > 0)
+    sha(expected)
+    if version not in PUBLIC_BASELINES:
+        download_url(urls[version][target]['url'], destination, expected)
+        return
+    metadata = api.api(f'releases/assets/{identifier}')
+    require(isinstance(metadata, dict))
+    require(type(metadata.get('id')) is int and metadata['id'] == identifier)
+    require(metadata.get('name') == f'SOFT-Tracking-{target}-{version}.zip')
+    require(metadata.get('state') == 'uploaded' and metadata.get('digest') == 'sha256:' + expected)
+    size = metadata.get('size')
+    require(type(size) is int and 0 < size <= MAX_BUNDLE)
+    api.asset(identifier, destination, expected, size)
 
 
 def candidate_identity(tag):
@@ -421,8 +442,7 @@ def download():
     for old in upgrade_baselines(VERSION):
         STAGE = 'baseline-' + old
         pin = pins[old][row['target']]
-        require(type(pin[0]) is int and pin[0] > 0)
-        download_url(urls[old][row['target']]['url'], root / (old + '.zip'), sha(pin[1]))
+        download_baseline(api, old, row['target'], pin, urls, root / (old + '.zip'))
     del raw, urls
     STAGE = 'candidate'
     name = 'SOFT-Tracking-' + row['target'] + '-' + VERSION + '.zip'

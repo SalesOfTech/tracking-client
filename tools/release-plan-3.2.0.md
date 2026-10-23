@@ -1,15 +1,17 @@
-# 3.2.0 Acceptance and Stable Publication
+# Acceptance and Stable Publication
 
 The separate `.github/workflows/accept-release.yml` now implements this path.
 The candidate build workflow remains candidate-only. No build, acceptance,
 publication, environment configuration or secret operation is performed locally.
+This document retains its original filename; the contract applies to the selected
+stable workflow `version` input (`ACCEPTANCE_VERSION`), including `3.5.0`.
 
 ## Operator Contract
 
-- Finish all eight candidate build jobs successfully with payload version `3.2.0`.
+- Finish all eight candidate build jobs successfully with the selected payload version.
 - Commit the acceptance harness separately; rebuilding the candidate is unnecessary.
-- Dispatch `accept-release.yml` from `main` with `candidate_tag` exactly
-  `candidate-3.2.0-<run_id>-<run_attempt>`.
+- Dispatch `accept-release.yml` from `main` with the matching `version` and
+  `candidate_tag` exactly `candidate-<version>-<run_id>-<run_attempt>`.
 - The dispatch actor and rerun actor must have repository admin or maintain access.
 - Environment `tracking-release-acceptance` must have
   `deployment_branch_policy={"protected_branches":false,"custom_branch_policies":true}`
@@ -23,9 +25,25 @@ publication, environment configuration or secret operation is performed locally.
 - Secret `TRACKING_BASELINE_URLS` is JSON
   `{"3.1.0":{target:{"url":signedURL}},"3.0.4":{target:{"url":signedURL}}}`.
   Expand each target map to all eight names in `tools/ci.py`: exactly 16 slots.
+  Only these two private baselines require delegated URLs, even when acceptance
+  requires seven versions. Keep the JSON within the unchanged 48 KiB limit.
   Only HTTPS `release-assets.githubusercontent.com` URLs with query strings are
   accepted, with no userinfo, fragment or nonstandard port. No redirects or
   GitHub Authorization headers are sent on these delegated requests.
+- Public baselines `3.4.2`, `3.4.0`, `3.3.2`, `3.3.0`, and `3.2.0`, when required by
+  `upgrade_baselines(version)`, come from the current `GITHUB_REPOSITORY`
+  (`SalesOfTech/tracking-client`) through `GitHub.asset`. The harness reads the
+  pinned asset ID and SHA-256 from `tools/upgrade-baselines.json`, checks API
+  metadata for the exact `SOFT-Tracking-<target>-<version>.zip` name, ID, uploaded
+  state, digest and bounded size, then verifies the downloaded bytes against the
+  pinned SHA-256 and exact metadata size. GitHub credentials stay on the API
+  request; any delegated asset redirect uses the same strict URL/no-auth rules.
+  Missing or mismatched public assets fail without falling back to secret URLs.
+- For compatibility, a complete URL map for every required version is also
+  accepted within 48 KiB. All supplied URLs are validated and masked, but public
+  slots are ignored for downloading and cannot override the pins. Partial mixed
+  maps, extra versions/targets and digest overrides are rejected. Prefer the
+  private-only map to avoid storing 56 expiring URLs.
 - Issue the URLs only after the candidate is green. Preflight their usability
   privately, never print them, and remove the ephemeral secret after the run.
   Removing the secret is not URL revocation. Expired or unavailable URLs fail;
@@ -35,6 +53,8 @@ publication, environment configuration or secret operation is performed locally.
 
 The harness checkout is the acceptance dispatch's exact main SHA. The candidate
 is checked out separately under `candidate/` at the successful build's SHA.
+The harness SHA may differ from the candidate SHA; this downloader-only change
+does not require a candidate rebuild or a payload/source change.
 Preflight validates the candidate workflow identity, main/manual event, completed
 success, run attempt, all eight native jobs, candidate publication job, and
 lightweight candidate tag SHA. It freezes the Release ID and all 16 public asset
@@ -51,11 +71,14 @@ acceptance run/attempt/actors are recorded alongside it.
 
 The downloader and original published-package path share
 `smoke_published.stage_published_archive()`. The original private script is not
-modified. Both genuine versions run on each matching native runner using the
+modified. Every required genuine version runs on each matching native runner using the
 existing `smoke_update.py --published` assertions: original bootstrap, running
 installer upgrade, new frozen health, extension switch, rollback and retained
 queue/device/receipts. No synthetic substitute, rebuilt baseline, optional skip
-or lowered archive limit can satisfy these 16 cases.
+or lowered archive limit can satisfy these cases. For `3.5.0`, the seven versions
+are `3.4.2`, `3.4.0`, `3.3.2`, `3.3.0`, `3.2.0`, `3.1.0`, and `3.0.4`: all 56
+version/target combinations remain mandatory. The download source does not alter
+signature, staging, upgrade, rollback or retained-bootstrap assertions.
 
 `TRACKING_SMOKE_CLIENT_ROOT` points the smoke process's client imports at the
 candidate checkout, not the harness. A path check rejects mixed client modules.
@@ -70,11 +93,11 @@ malicious code or intentional network exfiltration.
 
 Only eight successful native jobs with successful smoke steps permit promotion.
 A clean runner with no baseline secret or private files revalidates the candidate
-and creates a NEW `v3.2.0` tag at the candidate SHA and a draft stable release.
+and creates a NEW `v<version>` tag at the candidate SHA and a draft stable release.
 It copies unchanged current ZIP/checksum bytes, repeats signature/provenance
 checks, then downloads and hashes all uploaded remote assets before setting
-`draft=false, prerelease=false`. It remains non-Latest; its payload is normal
-`3.2.0`, not an RC. Release notes record both SHAs, actors, candidate/acceptance
+`draft=false, prerelease=false`. It remains non-Latest; its payload is the selected
+stable version, not an RC. Release notes record both SHAs, actors, candidate/acceptance
 run identities and the approved public asset hashes.
 
 A fresh full acceptance run can resume an interrupted draft only at the exact

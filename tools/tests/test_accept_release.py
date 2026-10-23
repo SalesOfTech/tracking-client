@@ -186,9 +186,9 @@ class GateTests(unittest.TestCase):
             with self.subTest(raw=raw), self.assertRaises((ValueError, TypeError)):
                 gate.trusted_keys(raw)
 
-    def urls(self):
+    def urls(self, versions=('3.1.0', '3.0.4')):
         return {old: {row['target']: {'url': 'https://release-assets.githubusercontent.com/fixture?sig=not-real'}
-                      for row in gate.TARGETS} for old in ('3.1.0', '3.0.4')}
+                      for row in gate.TARGETS} for old in versions}
 
     def test_url_secret_requires_exact_sixteen_slots_and_no_digest_override(self):
         self.assertEqual(gate.baseline_urls(json.dumps(self.urls())), self.urls())
@@ -218,6 +218,129 @@ class GateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             gate.receive(response, self.root / 'download', 'a' * 64)
 
+    def test_seven_baselines_accept_private_only_or_full_url_map(self):
+        with patch.object(gate, 'VERSION', '3.5.0'):
+            versions = gate.upgrade_baselines(gate.VERSION)
+            self.assertEqual(len(versions), 7)
+            for urls in (self.urls(), self.urls(versions)):
+                self.assertEqual(gate.baseline_urls(json.dumps(urls)), urls)
+            for urls in (self.urls(['3.1.0']), self.urls(['3.1.0', '3.0.4', '3.2.0']),
+                         self.urls(versions + ['9.9.9']), self.urls(versions[:-1])):
+                with self.subTest(versions=list(urls)), self.assertRaises(ValueError):
+                    gate.baseline_urls(json.dumps(urls))
+            urls = self.urls(versions)
+            urls['3.4.2'][gate.TARGETS[0]['target']]['url'] = 'https://evil.test/a?x=1'
+            with self.assertRaises(ValueError):
+                gate.baseline_urls(json.dumps(urls))
+            with self.assertRaises(ValueError):
+                gate.baseline_urls(' ' * (48 * 1024) + json.dumps(self.urls()))
+
+    def test_public_baseline_uses_pinned_id_digest_and_exact_metadata_size(self):
+        row = gate.TARGETS[0]
+        api = Mock()
+        for version in sorted(gate.PUBLIC_BASELINES):
+            metadata = dict(id=123, name=f'SOFT-Tracking-{row["target"]}-{version}.zip',
+                            state='uploaded', digest='sha256:' + 'a' * 64, size=1234)
+            api.api.return_value = metadata
+            destination = self.root / (version + '.zip')
+            with patch.object(gate, 'download_url') as delegated:
+                gate.download_baseline(api, version, row['target'], [123, 'a' * 64],
+                                       self.urls(gate.upgrade_baselines('3.5.0')), destination)
+            api.api.assert_called_with('releases/assets/123')
+            api.asset.assert_called_with(123, destination, 'a' * 64, 1234)
+            delegated.assert_not_called()
+
+    def test_public_metadata_mismatch_never_downloads_or_falls_back(self):
+        target = gate.TARGETS[0]['target']
+        metadata = dict(id=123, name=f'SOFT-Tracking-{target}-3.4.2.zip',
+                        state='uploaded', digest='sha256:' + 'a' * 64, size=1234)
+        for change in ({'id': 124}, {'id': True}, {'name': 'wrong.zip'}, {'state': 'new'},
+                       {'digest': None}, {'digest': 'sha256:' + 'b' * 64},
+                       {'size': 0}, {'size': True}, {'size': gate.MAX_BUNDLE + 1}):
+            api = Mock()
+            api.api.return_value = dict(metadata, **change)
+            with self.subTest(change=change), patch.object(gate, 'download_url') as delegated:
+                with self.assertRaises(ValueError):
+                    gate.download_baseline(api, '3.4.2', target, [123, 'a' * 64],
+                                           self.urls(['3.4.2']), self.root / 'download')
+                api.asset.assert_not_called()
+                delegated.assert_not_called()
+        for failing_method in ('api', 'asset'):
+            api = Mock()
+            api.api.return_value = metadata
+            getattr(api, failing_method).side_effect = ValueError('unavailable or corrupted asset')
+            with self.subTest(failing_method=failing_method), patch.object(gate, 'download_url') as delegated:
+                with self.assertRaises(ValueError):
+                    gate.download_baseline(api, '3.4.2', target, [123, 'a' * 64],
+                                           self.urls(['3.4.2']), self.root / 'download')
+                delegated.assert_not_called()
+
+    def test_private_baselines_use_delegated_urls_without_github_access(self):
+        target = gate.TARGETS[0]['target']
+        for version in ('3.1.0', '3.0.4'):
+            api = Mock()
+            with patch.object(gate, 'download_url') as delegated:
+                gate.download_baseline(api, version, target, [123, 'a' * 64], self.urls(), self.root / 'download')
+            delegated.assert_called_once_with(self.urls()[version][target]['url'], self.root / 'download', 'a' * 64)
+            api.api.assert_not_called()
+            api.asset.assert_not_called()
+
+    def test_invalid_baseline_pins_fail_before_network(self):
+        for pin in ([], [123], [True, 'a' * 64], [0, 'a' * 64], [123, 'bad'], [123, 'a' * 64, 'extra']):
+            api = Mock()
+            with self.subTest(pin=pin), patch.object(gate, 'download_url') as delegated:
+                with self.assertRaises(ValueError):
+                    gate.download_baseline(api, '3.4.2', gate.TARGETS[0]['target'], pin, {}, self.root / 'download')
+                api.api.assert_not_called()
+                delegated.assert_not_called()
+
+    def test_all_56_baselines_still_download_stage_and_run_actual_upgrade_command(self):
+        pins = json.loads((ROOT / 'tools/upgrade-baselines.json').read_text())
+        versions = gate.upgrade_baselines('3.5.0')
+        for row in gate.TARGETS:
+            root = self.root / row['target']
+            name = f'SOFT-Tracking-{row["target"]}-3.5.0.zip'
+            plan = dict(self.plan, version='3.5.0', assets={
+                name: {'id': 1, 'sha256': 'a' * 64, 'size': 10},
+                name + '.sha256': {'id': 2, 'sha256': 'b' * 64, 'size': 100}})
+            api = Mock()
+            metadata = {pins[old][row['target']][0]: {
+                'id': pins[old][row['target']][0], 'name': f'SOFT-Tracking-{row["target"]}-{old}.zip',
+                'size': 1234, 'state': 'uploaded', 'digest': 'sha256:' + pins[old][row['target']][1]}
+                for old in gate.PUBLIC_BASELINES}
+            api.api.side_effect = lambda suffix: metadata[int(suffix.rsplit('/', 1)[1])]
+
+            def asset(identifier, destination, expected, size):
+                if identifier == 2:
+                    destination.write_text('a' * 64 + '  ' + name, encoding='ascii')
+
+            api.asset.side_effect = asset
+            with self.subTest(target=row['target']), patch.object(gate, 'VERSION', '3.5.0'), \
+                    patch.object(gate, 'read_plan', return_value=plan), \
+                    patch.object(gate, 'row_for_target', return_value=row), \
+                    patch.object(gate, 'check_native'), patch.object(gate, 'revalidate'), \
+                    patch.object(gate, 'GitHub', return_value=api), \
+                    patch.object(gate, 'private_root', return_value=root), \
+                    patch.dict(os.environ, TRACKING_BASELINE_URLS=json.dumps(self.urls())), \
+                    patch.object(gate, 'download_url') as delegated, \
+                    patch.object(gate, 'stage_candidate') as current, \
+                    patch.object(gate, 'stage_published_archive') as stage, \
+                    patch.object(gate.subprocess, 'run') as run, redirect_stdout(io.StringIO()):
+                gate.download()
+                self.assertNotIn('TRACKING_BASELINE_URLS', os.environ)
+                self.assertEqual(api.api.call_count, 5)
+                self.assertEqual(api.asset.call_count, 7)  # Five baselines plus candidate/checksum.
+                self.assertEqual(delegated.call_count, 2)
+                self.assertEqual([call.args[1] for call in delegated.call_args_list],
+                                 [root / (old + '.zip') for old in ('3.1.0', '3.0.4')])
+                current.assert_called_once()
+                self.assertEqual([call.args[2] for call in stage.call_args_list], versions)
+                self.assertTrue(all(call.args[3:5] == (row['target'], self.keys) for call in stage.call_args_list))
+                gate.test()
+                self.assertEqual(run.call_count, 7)
+                self.assertEqual([call.args[0][2] for call in run.call_args_list], [str(root / old) for old in versions])
+                self.assertTrue(all(call.args[0][-1] == '--published' and call.kwargs['check'] for call in run.call_args_list))
+
     def test_delegated_download_never_sends_auth_or_follows_redirect(self):
         response = Mock(status_code=200)
         response.iter_content.return_value = [b'fixture']
@@ -238,12 +361,41 @@ class GateTests(unittest.TestCase):
     def test_download_hash_size_and_expired_response_fail(self):
         for index, (status, data, expected, size) in enumerate(((403, b'fixture', 'a' * 64, None),
                                             (200, b'fixture', 'a' * 64, None),
-                                            (200, b'fixture', hashlib.sha256(b'fixture').hexdigest(), 2))):
+                                            (200, b'fixture', hashlib.sha256(b'fixture').hexdigest(), 2),
+                                            (200, b'fixture', hashlib.sha256(b'fixture').hexdigest(), 8),
+                                            (200, b'', hashlib.sha256(b'').hexdigest(), None))):
             response = Mock(status_code=status)
             response.iter_content.return_value = [data]
             path = self.root / ('download-' + str(index))
             with self.assertRaises(ValueError):
                 gate.receive(response, path, expected, size)
+
+    def test_github_asset_redirect_keeps_token_on_api_and_verifies_exact_bytes(self):
+        expected = hashlib.sha256(b'fixture').hexdigest()
+        delegated = self.urls()['3.1.0'][gate.TARGETS[0]['target']]['url']
+        responses = [Mock(status_code=302, headers={'Location': delegated}), Mock(status_code=200)]
+        responses[1].iter_content.return_value = [b'fixture']
+        sessions = []
+        for response in responses:
+            response.__enter__ = Mock(return_value=response)
+            response.__exit__ = Mock(return_value=False)
+            session = Mock()
+            session.get.return_value = response
+            session.__enter__ = Mock(return_value=session)
+            session.__exit__ = Mock(return_value=False)
+            sessions.append(session)
+        with patch.dict(os.environ, GH_TOKEN='fictional-token'), \
+                patch.object(gate.requests, 'Session', side_effect=sessions):
+            gate.GitHub().asset(123, self.root / 'public.zip', expected, 7)
+        self.assertEqual(gate.digest(self.root / 'public.zip'), expected)
+        self.assertEqual(sessions[0].get.call_args.args[0],
+                         f'https://api.github.com/repos/{self.repo}/releases/assets/123')
+        self.assertEqual(sessions[0].get.call_args.kwargs['headers']['Authorization'], 'Bearer fictional-token')
+        self.assertEqual(sessions[1].get.call_args.args[0], delegated)
+        self.assertNotIn('headers', sessions[1].get.call_args.kwargs)
+        self.assertNotIn('auth', sessions[1].get.call_args.kwargs)
+        self.assertTrue(all(not session.trust_env and not session.get.call_args.kwargs['allow_redirects']
+                            for session in sessions))
 
     def test_native_check_binds_actual_interpreter_and_candidate_checkout(self):
         row = gate.TARGETS[0]
