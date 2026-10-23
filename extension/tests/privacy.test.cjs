@@ -34,3 +34,41 @@ test('unknown fields are not copied', () => {
   const clean=privacy.sanitize(input,policy);
   for(const key of ['html','cookies','employee_key']) assert.equal(clean[key],undefined);
 });
+
+test('extended activity is strictly opt-in and only permits tracking sessions', () => {
+  const input = {...event(), type:'web_session', end_timestamp:1700000010, url:'https://other.test/private?secret=yes#fragment'};
+  for (const extended_activity of [undefined, false, 0, 1, 'true', null]) {
+    assert.equal(privacy.sanitize(input, {...policy, extended_activity}), null);
+  }
+  for (const tracking of [false, undefined, 1, 'true']) {
+    assert.equal(privacy.sanitize(input, {...policy, extended_activity:true, tracking}), null);
+  }
+  for (const type of ['navigation','link_click','button_click','field_change','form_submit','unknown']) {
+    assert.equal(privacy.sanitize({...input, type}, {...policy, extended_activity:true}), null, type);
+  }
+});
+
+test('extended sessions expose only normalized origins and timestamps with distinct domains', () => {
+  const input = {...event(), type:'web_session', end_timestamp:1700000010, title:'private', target:{value:'private'}, html:'private'};
+  for (const [url, expected] of [
+    ['https://user:password@Other.TEST:8443/private?token=private#private', 'https://other.test:8443/'],
+    ['http://Sub.Other.TEST:80/private', 'http://sub.other.test/'],
+    ['https://second.test/private', 'https://second.test/']
+  ]) {
+    assert.deepEqual(privacy.sanitize({...input, url}, {...policy, extended_activity:true}), {
+      event_id:input.event_id, type:'web_session', timestamp:input.timestamp, end_timestamp:input.end_timestamp, url:expected
+    });
+  }
+  for (const url of ['file:///private', 'chrome://settings', 'about:blank', 'data:text/plain,private', 'blob:https://other.test/id', 'invalid']) {
+    assert.equal(privacy.sanitize({...input, url}, {...policy, extended_activity:true}), null);
+  }
+});
+
+test('allowlisted events are unchanged with extended activity enabled or disabled', () => {
+  for (const input of [event({input_type:'text', label:'Project name', value:'Spring campaign'}),
+    {...event(), type:'web_session', end_timestamp:1700000010}]) {
+    for (const extended_activity of [false, true]) {
+      assert.deepEqual(privacy.sanitize(input, {...policy, extended_activity}), privacy.sanitize(input, policy));
+    }
+  }
+});

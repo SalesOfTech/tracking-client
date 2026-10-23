@@ -26,8 +26,8 @@ def smoke_macos_uninstall(app, metadata, version, env):
     result = run_frozen([str(app), '--uninstall-self-test'], env=env, timeout=60)
     if result.returncode:
         raise RuntimeError('Frozen isolated macOS uninstall smoke failed: ' + result.stderr.decode(errors='replace')[-8000:])
-    # The actual runtime is onedir. A separate onefile harness exercises the live
-    # bootloader-parent exemption against the pinned PyInstaller, not mocks.
+    # Also exercise the live bootloader-parent exemption with an independent
+    # onefile harness, including when testing older onedir baseline runtimes.
     from release import freeze
     with tempfile.TemporaryDirectory(prefix='soft-uninstall-onefile-') as temporary:
         folder = Path(temporary).resolve()
@@ -63,6 +63,10 @@ def main(bundle):
             assert (root / 'extension' / name).is_file(), 'Missing installed guide: ' + name
         health=Path(temporary)/'health.json'
         env=dict(os.environ,SOFT_TRACKING_INSTALL=str(root),SOFT_TRACKING_HEALTH=str(health),LOCALAPPDATA=temporary,XDG_DATA_HOME=temporary)
+        if metadata['os'] == 'macos':
+            # Duplicate extraction paths and failed onefile cleanup must fail CI,
+            # including in the installed launcher's supervisor/desktop children.
+            env['PYINSTALLER_STRICT_UNPACK_MODE'] = '1'
         version=json.loads((root/'current.json').read_text())['version']
         app=release_path(root,version)/'app'/executable_name()
         assert_ui_payload(app.parent, metadata, bundle)

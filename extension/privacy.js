@@ -21,6 +21,15 @@
       });
     } catch (_) { return false; }
   }
+  function sessionUrl(raw, policy) {
+    if (!policy || !policy.tracking) return '';
+    if (hostAllowed(raw, policy.domains)) return cleanUrl(raw);
+    if (policy.tracking !== true || policy.extended_activity !== true) return '';
+    try {
+      const url = new URL(raw);
+      return ['http:', 'https:'].includes(url.protocol) ? url.origin + '/' : '';
+    } catch (_) { return ''; }
+  }
   function safeValue(value, target) {
     if (typeof value !== 'string' || value.length > 512) return undefined;
     if (!['text', 'search', 'email', 'tel', 'number', 'date', 'time', 'checkbox', 'radio', 'select', 'textarea'].includes(target.input_type)) return undefined;
@@ -29,15 +38,17 @@
     return value;
   }
   function sanitize(event, policy) {
-    if (!event || !policy || !hostAllowed(event.url, policy.domains) || !Number.isInteger(event.timestamp)) return null;
+    if (!event || !policy || !Number.isInteger(event.timestamp)) return null;
     if (!/^[a-f0-9]{32}$/.test(event.event_id || '')) return null;
     const result = {event_id: event.event_id, type: event.type, timestamp: event.timestamp, url: cleanUrl(event.url)};
     if (event.type === 'web_session') {
+      result.url = sessionUrl(event.url, policy);
+      if (!result.url) return null;
       if (!policy.tracking || !Number.isInteger(event.end_timestamp) || event.end_timestamp < event.timestamp || event.end_timestamp - event.timestamp > 3600) return null;
       result.end_timestamp = event.end_timestamp;
       return result;
     }
-    if (!policy.interactions || !['link_click', 'button_click', 'field_change', 'form_submit', 'navigation'].includes(event.type)) return null;
+    if (!hostAllowed(event.url, policy.domains) || !policy.interactions || !['link_click', 'button_click', 'field_change', 'form_submit', 'navigation'].includes(event.type)) return null;
     const target = event.target || {};
     result.target = {};
     for (const key of ['tag', 'role', 'name', 'label', 'input_type', 'autocomplete']) result.target[key] = plain(target[key]);
@@ -48,7 +59,7 @@
     }
     return result;
   }
-  const api = Object.freeze({cleanUrl, hostAllowed, safeValue, sanitize});
+  const api = Object.freeze({cleanUrl, hostAllowed, sessionUrl, safeValue, sanitize});
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.TrackingPrivacy = api;
 })(globalThis);

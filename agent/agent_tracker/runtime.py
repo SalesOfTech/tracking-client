@@ -34,7 +34,7 @@ class Worker(threading.Thread):
         try:
             policy = self.client.policy()
             self.tracker = ActivityTracker(load_platform_adapter(), self.client.outbox,
-                TrackerConfig(track_processes=policy.get('track_processes', []) if policy.get('tracking') else []))
+                TrackerConfig.from_policy(policy))
             self.tracker.start()
             self.capability_error = ''
         except Exception as error:
@@ -155,7 +155,7 @@ class Worker(threading.Thread):
                 next_config = next_flush = 0
             policy = self.client.policy()
             if self.tracker:
-                self.tracker.update_config(TrackerConfig(track_processes=policy.get('track_processes', []) if policy.get('tracking') else []))
+                self.tracker.update_config(TrackerConfig.from_policy(policy))
             if not self.client.state.get('identity'):
                 return next_config, next_flush, failures
             try:

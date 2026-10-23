@@ -16,10 +16,10 @@ const event = (id, host = 'old.example.test', timestamp = NOW - 10) => ({event_i
   type:'button_click',timestamp,url:`https://${host}/page`,target:{tag:'button',label:'Save'}});
 const session = (id, end = NOW - 1) => ({event_id:id.toString(16).padStart(32,'0'),type:'web_session',timestamp:NOW - 20,
   end_timestamp:end,url:'https://old.example.test/page'});
-const sender = url => ({tab:{id:1},id:'fixture',url});
+const sender = url => ({tab:{id:1,incognito:false},frameId:0,id:'fixture',url});
 
 async function harness(t, options = {}) {
-  const h = {calls:[],badges:[],opened:[],storage:options.storage || {},factory:options.factory || new IDBFactory(),
+  const h = {calls:[],badges:[],opened:[],injected:[],storage:options.storage || {},factory:options.factory || new IDBFactory(),
     desktop:options.desktop || desktop(),now:NOW,storageError:false,reply:options.reply};
   const timers = new Set();
   let listener, clicked;
@@ -47,7 +47,8 @@ async function harness(t, options = {}) {
       delete chrome.runtime.lastError;
     }}},
     alarms:{onAlarm:{addListener:() => {}},create:() => {}},
-    tabs:{create:value => h.opened.push(value),query:(options, callback) => callback([])}
+    scripting:{executeScript:async value => { h.injected.push(plain(value)); }},
+    tabs:{create:value => h.opened.push(value),query:(query, callback) => callback(options.tabs || [])}
   };
   class ClockDate extends Date { static now() { return h.now * 1000; } }
   const context = vm.createContext({chrome,navigator:{userAgent:'Chrome/140',...(options.navigator || {})},
@@ -67,6 +68,7 @@ async function harness(t, options = {}) {
   h.request = (message, source = sender(message.event?.url || 'https://old.example.test/page')) =>
     new Promise(resolve => listener(message, source, result => resolve(plain(result))));
   h.click = () => clicked();
+  h.inject = () => vm.runInContext('injectOpenTabs()', context);
   h.batch = async () => plain(await h.queue.epochBatches());
   t.after(async () => {
     await vm.runInContext('Promise.all([syncing,checkpointing])', context);
@@ -303,4 +305,92 @@ test('storage failure preserves existing rows and does not publish new employee 
   await h.sync();
   assert.equal(h.status().employee_epoch, NEW);
   assert.deepEqual(await h.batch(), [{employee_epoch:OLD,events:[event(1),session(2)]}]);
+});
+
+test('extended background sessions are origin-only; interactions stay allowlisted', async t => {
+  const h = await harness(t, {desktop:desktop(OLD, {...policy(), extended_activity:true})});
+  await h.ready;
+  const raw = {...session(1), url:'https://other.test/private?secret=yes#fragment', title:'private', target:{value:'private'}};
+  assert.equal((await h.request({action:'session', employee_epoch:OLD, event:raw, close:true})).ok, true);
+  assert.deepEqual(await h.batch(), [{employee_epoch:OLD, events:[{...session(1), url:'https://other.test/'}]}]);
+  for (const type of ['navigation','link_click','button_click','field_change','form_submit']) {
+    assert.equal((await h.request({action:'record', employee_epoch:OLD, event:{...event(2,'other.test'), type}})).ok, false);
+  }
+  assert.equal((await h.request({action:'session', employee_epoch:OLD, event:raw, close:true}, sender('https://spoof.test/'))).ok, false);
+  assert.equal((await h.batch())[0].events.length, 1);
+});
+
+test('event-source tab validation rejects private, unknown, non-tab and subframe senders before writes or closes', async t => {
+  const h = await harness(t, {desktop:desktop(OLD, {...policy(), extended_activity:true})});
+  await h.ready;
+  const raw = {...session(1), url:'https://other.test/'};
+  await h.request({action:'session', employee_epoch:OLD, event:raw, close:false});
+  for (const change of [{tab:{id:1,incognito:true}}, {tab:{id:1}}, {tab:{id:-1,incognito:false}}, {tab:null},
+    {frameId:1}, {id:'foreign'}, {url:'file:///private'}, {url:'invalid'}]) {
+    const source = {...sender(raw.url), ...change};
+    for (const message of [
+      {action:'record', employee_epoch:OLD, event:event(2)},
+      {action:'session', employee_epoch:OLD, event:raw, close:true},
+      {action:'session-close', employee_epoch:OLD, event_id:raw.event_id}
+    ]) assert.equal((await h.request(message, source)).ok, false);
+  }
+  assert.deepEqual(await h.batch(), []);
+  assert.equal(await h.queue.closedSession(raw.event_id, OLD), false);
+  assert.equal(h.status().error, '');
+  assert.equal((await h.request({action:'session-close', employee_epoch:OLD, event_id:raw.event_id}, sender(raw.url))).ok, true);
+});
+
+test('extended activity stops on pause, expiry, disconnect and flag removal; existing checkpoints can close', async t => {
+  for (const mode of ['paused','expired','disconnected','disabled','absent']) {
+    const h = await harness(t, {desktop:desktop(OLD, {...policy(), extended_activity:true})});
+    await h.ready;
+    const raw = {...session(1), url:'https://other.test/'};
+    await h.request({action:'session', employee_epoch:OLD, event:raw, close:false});
+    if (mode === 'paused') h.desktop.policy.tracking = false;
+    if (mode === 'expired') h.now += 700;
+    if (mode === 'disconnected') h.reply = () => ({ok:false});
+    if (mode === 'disabled') h.desktop.policy.extended_activity = false;
+    if (mode === 'absent') delete h.desktop.policy.extended_activity;
+    await h.sync();
+    assert.equal((await h.request({action:'session', employee_epoch:OLD, event:{...raw, event_id:event(2).event_id}, close:false})).ok, false, mode);
+    assert.equal((await h.request({action:'session', employee_epoch:OLD, event:{...raw, end_timestamp:NOW + 10}, close:true})).ok, true, mode);
+    assert.deepEqual(await h.batch(), [{employee_epoch:OLD, events:[raw]}]);
+  }
+});
+
+test('extended session epoch handoff retains old origin-only checkpoint without widening new policy', async t => {
+  const h = await harness(t, {desktop:desktop(OLD, {...policy(), extended_activity:true})});
+  await h.ready;
+  const raw = {...session(1), url:'https://other.test/private'};
+  await h.request({action:'session', employee_epoch:OLD, event:raw, close:false});
+  h.desktop = desktop(NEW);
+  await h.sync();
+  assert.equal((await h.request({action:'session', employee_epoch:OLD, event:{...raw, end_timestamp:NOW + 10}, close:false})).ok, true);
+  assert.equal((await h.request({action:'session', employee_epoch:NEW, event:{...raw, event_id:event(2).event_id}, close:false})).ok, false);
+  assert.deepEqual(await h.batch(), [{employee_epoch:OLD, events:[{...session(1), url:'https://other.test/'}]}]);
+});
+
+test('open-tab injection extends only to non-private HTTP(S) tabs with tracking and explicit opt-in', async t => {
+  const tabs = [
+    {id:1,incognito:false,url:'https://old.example.test/page'},
+    {id:2,incognito:false,url:'https://other.test/private'},
+    {id:3,incognito:true,url:'https://other.test/private'},
+    {id:4,incognito:true,url:'https://old.example.test/page'},
+    {id:5,incognito:false,url:'file:///private'},
+    {id:6,url:'https://other.test/private'}
+  ];
+  const h = await harness(t, {tabs});
+  await h.ready;
+  h.inject();
+  assert.deepEqual(h.injected.map(row => row.target.tabId), [1]);
+  h.injected.length = 0;
+  h.desktop.policy.extended_activity = true;
+  await h.sync();
+  h.inject();
+  assert.deepEqual(h.injected.map(row => row.target.tabId), [1,2]);
+  h.injected.length = 0;
+  h.desktop.policy.tracking = false;
+  await h.sync();
+  h.inject();
+  assert.deepEqual(h.injected.map(row => row.target.tabId), [1]);
 });

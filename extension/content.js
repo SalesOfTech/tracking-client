@@ -3,12 +3,13 @@
   if (window.__softTrackingV3) {
     try { window.__softTrackingV3.stop(); } catch (_) { /* Previous extension context may already be invalidated. */ }
   }
+  if (chrome.extension && chrome.extension.inIncognitoContext) return;
   let policy = {};
   let employeeEpoch = null;
   let sessionGeneration = null;
   let activeAt = Date.now();
   let session = null;
-  let currentUrl = location.href;
+  let currentUrl = '';
   let stopped = false;
   const listeners = [];
   const pending = [];
@@ -18,7 +19,11 @@
   function id() {
     return Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
   }
-  function enabled() { return !stopped && !deliveryBlocked && /^[a-f0-9]{32}$/.test(employeeEpoch || '') && policy.policy_expires_at * 1000 > Date.now() && TrackingPrivacy.hostAllowed(location.href, policy.domains); }
+  function enabled() { return !stopped && !deliveryBlocked && /^[a-f0-9]{32}$/.test(employeeEpoch || '') && policy.policy_expires_at * 1000 > Date.now(); }
+  function interactionsEnabled() { return enabled() && policy.interactions && TrackingPrivacy.hostAllowed(location.href, policy.domains); }
+  function pageUrl() {
+    return TrackingPrivacy.hostAllowed(location.href, policy.domains) ? location.href : TrackingPrivacy.sessionUrl(location.href, policy);
+  }
   function drain() {
     if (sending || !pending.length) return;
     sending = true;
@@ -46,7 +51,7 @@
     drain();
   }
   function send(type, target, timing) {
-    if (!enabled()) return;
+    if (!interactionsEnabled()) return;
     const event = TrackingPrivacy.sanitize(Object.assign({event_id: id(), type, timestamp: now(), url: currentUrl, target}, timing), policy);
     if (!event) return;
     queue({action: 'record', employee_epoch: employeeEpoch, event});
@@ -86,12 +91,13 @@
   }
   function tick() {
     drain();
-    if (currentUrl !== location.href) {
+    const nextUrl = pageUrl();
+    if (currentUrl !== nextUrl) {
       finishSession();
-      currentUrl = location.href;
-      send('navigation', {label: document.title.slice(0, 160)});
+      currentUrl = nextUrl;
+      if (interactionsEnabled()) send('navigation', {label: document.title.slice(0, 160)});
     }
-    if (!enabled() || document.visibilityState !== 'visible' || !document.hasFocus() || Date.now() - activeAt > 30000 || !policy.tracking) { finishSession(); return; }
+    if (!enabled() || document.visibilityState !== 'visible' || !document.hasFocus() || Date.now() - activeAt > 30000 || !TrackingPrivacy.sessionUrl(currentUrl, policy)) { finishSession(); return; }
     if (session !== null && now() - session.timestamp >= 15) finishSession();
     if (session === null) session = {event_id: id(), timestamp: now(), url: currentUrl, employee_epoch: employeeEpoch};
     const event = TrackingPrivacy.sanitize({event_id: session.event_id, type: 'web_session', timestamp: session.timestamp,
@@ -99,15 +105,15 @@
     if (event) queue({action: 'session', employee_epoch: session.employee_epoch, event, close: false});
   }
   on(document, 'click', event => {
-    if (!event.isTrusted || !enabled()) return;
+    if (!event.isTrusted || !interactionsEnabled()) return;
     const path = event.composedPath ? event.composedPath() : [event.target];
     const element = path.find(item => item instanceof Element && item.matches('a[href],button,[role="button"],[role="tab"],input[type="submit"]'));
     if (element) send(element.tagName.toLowerCase() === 'a' ? 'link_click' : 'button_click', describe(element, false));
   }, true);
   on(document, 'change', event => {
-    if (event.isTrusted && enabled() && event.target instanceof Element && event.target.matches('input,textarea,select')) send('field_change', describe(event.target, true));
+    if (event.isTrusted && interactionsEnabled() && event.target instanceof Element && event.target.matches('input,textarea,select')) send('field_change', describe(event.target, true));
   }, true);
-  on(document, 'submit', event => { if (event.isTrusted && event.target instanceof Element) send('form_submit', describe(event.target, false)); }, true);
+  on(document, 'submit', event => { if (event.isTrusted && interactionsEnabled() && event.target instanceof Element) send('form_submit', describe(event.target, false)); }, true);
   for (const name of ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll']) on(document, name, event => { if (event.isTrusted) activeAt = Date.now(); }, {passive: true, capture: true});
   on(document, 'visibilitychange', tick);
   on(window, 'blur', finishSession);
@@ -119,6 +125,7 @@
     employeeEpoch = next.employee_epoch || null;
     sessionGeneration = next.browser_session_generation;
     policy = nextPolicy;
+    if (!currentUrl) currentUrl = pageUrl();
     drain();
   }
   const storageChange = (changes, area) => { if (area === 'local' && changes.status) applyStatus(changes.status.newValue); };

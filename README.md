@@ -55,6 +55,23 @@ Candidates do not publish production releases or alter the live update catalog.
 Signing credentials are configured separately by authorized maintainers and are
 never part of source.
 
+### macOS Packaging and Trust
+
+The macOS Python runtime uses PyInstaller onefile packaging so its versioned
+`Python.framework` symlinks survive the regular-file-only update ZIP. The executable
+paths and launcher protocol stay unchanged for existing installations. Windows
+and Linux retain their onedir runtime layout. Native macOS builds validate the
+embedded framework aliases and verify executable and installer bundle signatures
+before creating the DMG; installation and update smoke tests remain required.
+
+These integrity checks and ad-hoc signatures do **not** establish Apple trust.
+Without Developer ID signing and Apple notarization, a downloaded build can still
+be blocked by Gatekeeper, even after the framework packaging defect is fixed.
+Do not advertise such a build as requiring no security exceptions. Acceptance of
+that requirement needs a downloaded installer tested on a clean, Gatekeeper-enabled
+Mac, not just a successful launch on a CI runner. The installer must not disable
+Gatekeeper or remove quarantine attributes to hide this limitation.
+
 Synthetic update and rollback tests do not establish compatibility with every
 previous installation. Real published-version upgrade acceptance and production
 promotion remain separate private gates. Retained baseline identifiers and hashes
@@ -63,6 +80,23 @@ are verification metadata, not bundled old installers or authorization tokens.
 Keep local identities, queues, generated binaries and credentials out of commits.
 Private browser extension installation may require an explicit browser confirmation.
 Source availability does not disable OS permissions or device/company revocation.
+
+## Optional Extended Activity
+
+Version 3.5.0 understands the server policy `extended_activity: true`. This is
+off when absent and still requires tracking to be enabled. It adds active-time
+sessions for websites and foreground applications outside the company's work
+list. Browser sessions contain only the origin for these sites; page contents,
+titles, paths and entered values are not collected. Existing interaction rules
+remain restricted to explicitly configured work domains. Private browser tabs
+are excluded. Automatic application collection excludes common system UI,
+bundled utilities, the tracker itself and supported browsers (to avoid counting
+their time twice); explicitly configured work applications keep their rules.
+
+The desktop shows the extended scope on its connection and settings screens.
+The backend must explicitly enable and accept this policy before additional
+data is sent. A site outside the work list is not proof of unproductive work;
+the data records observed usage, not an employment assessment.
 
 Third-party license notices are retained alongside their components. No additional
 license grant is implied by publication of this source.

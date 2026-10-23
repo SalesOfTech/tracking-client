@@ -255,7 +255,9 @@ def freeze(entry,name,dist,work,data=(),console=False,ui=None):
     ui = ui or os.environ.get('SOFT_TRACKING_UI', 'qt')
     if ui not in ('electron', 'qt'):
         raise ValueError('Unknown desktop UI backend')
-    directory = entry == 'runtime_entry.py'
+    # The regular-file update ZIP cannot carry PyInstaller's framework symlinks.
+    # On macOS let the onefile bootloader restore them, including on old launchers.
+    directory = entry == 'runtime_entry.py' and platform.system() != 'Darwin'
     args=[sys.executable,"-m","PyInstaller","--noconfirm","--onedir" if directory else "--onefile","--noupx","--name",name,"--distpath",str(dist),"--workpath",str(work / name),"--specpath",str(work),"--paths",str(ROOT / "agent")]
     # PyNaCl loads this compiled dependency dynamically; analysis can miss it on ARM.
     args.extend(["--hidden-import","_cffi_backend"])
@@ -293,6 +295,19 @@ def freeze(entry,name,dist,work,data=(),console=False,ui=None):
     subprocess.run(args,check=True)
 
 
+def copy_runtime(source, destination, name, os_name):
+    source, destination = Path(source), Path(destination)
+    if os_name == 'macos':
+        executable = source / name
+        if (not executable.is_file() or executable.is_symlink() or
+                not executable.stat().st_mode & 0o111):
+            raise ValueError('macOS runtime must be a self-contained onefile executable')
+        destination.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(executable, destination / name)
+    else:
+        shutil.copytree(source / name, destination, dirs_exist_ok=True)
+
+
 def build(args):
     plan = build_plan(args)
     import re
@@ -311,12 +326,21 @@ def build(args):
     app_name = Path(executable_name()).stem
     freeze('runtime_entry.py', app_name, out/'runtime-dist', work,
            [(ROOT/'agent/agent_tracker/assets','agent_tracker/assets')], ui=ui)
-    shutil.copytree(out/'runtime-dist'/app_name, payload/'app', dirs_exist_ok=True)
+    copy_runtime(out/'runtime-dist', payload/'app', app_name, os_name)
     if desktop:
         copy_electron(desktop, payload/'app/electron')
     freeze('native_entry.py', Path(executable_name(True)).stem, payload/'app', work, console=True, ui=ui)
     for native,entry in [(False,"bootstrap_entry.py"),(True,"bootstrap_native_entry.py")]:
         freeze(entry,Path(executable_name(native,True)).stem,payload / "launcher",work,console=native,ui=ui)
+    if os_name == 'macos':
+        if __package__:
+            from .macos_archive import verify_frozen
+        else:
+            from macos_archive import verify_frozen
+        for executable in (payload/'app'/app_name, payload/'app'/executable_name(True),
+                           payload/'launcher'/executable_name(False, True),
+                           payload/'launcher'/executable_name(True, True)):
+            verify_frozen(executable)
     extension=payload / "extension"
     shutil.copytree(ROOT / "extension",extension,ignore=shutil.ignore_patterns("tests","compat","*.md"))
     manifest=json.loads((extension / "manifest.json").read_text(encoding="utf-8"))
@@ -382,6 +406,8 @@ def build(args):
         atomic_json(out / 'migration.json', dict(file=migrator.name, version=args.version,
                                                target=target, sha256=file_digest(migrator)))
     if os_name=="macos":
+        bundle = out / 'SOFT-Tracking-Setup.app'
+        verify_frozen(bundle / 'Contents/MacOS/SOFT-Tracking-Setup', bundle)
         installer=out / "SOFT-Tracking-Setup.dmg"
         create_macos_image(out / 'SOFT-Tracking-Setup.app', installer)
     elif os_name=="windows": installer=out / "SOFT-Tracking-Setup.exe"

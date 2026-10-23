@@ -102,8 +102,9 @@ class Bridge(QObject):
             duration=max(0, receipt.get('end_timestamp', 0)-receipt.get('timestamp', 0)),
             pending=status['queue']['pending'], rejected=status['queue']['rejected'],
             error=labels['server_unavailable'] if status['error'] else '',
+            extendedActivity=policy.get('extended_activity') is True,
             policy=[dict(name=labels[key], enabled=bool(policy.get(flag))) for key,flag in
-                    [('web_time','tracking'),('clicks','interactions'),('fields','field_values'),('programs','app_inventory')]],
+                    [('web_time','tracking'),('clicks','interactions'),('fields','field_values'),('programs','app_inventory'),('extended_activity','extended_activity')]],
             domains=policy.get('domains', []),
             updateLabel=labels.get(update_key, labels['update_unknown']),
             updateBusy=update['busy'], updateCheckedAt=time_label(update['checked_at']),

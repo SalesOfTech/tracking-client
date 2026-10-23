@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional, Sequence, Set
 
 from .event_queue import Event, EventQueue, current_timestamp
+from .activity_scope import automatic_application
 
 
 LOG = logging.getLogger(__name__)
@@ -18,6 +19,13 @@ class TrackerConfig:
     poll_ms: int = 1000
     inactivity_ms: int = 30000
     track_processes: Sequence[str] = ()
+    extended_activity: bool = False
+
+    @classmethod
+    def from_policy(cls, policy):
+        enabled = policy.get('tracking') is True
+        return cls(track_processes=policy.get('track_processes', []) if enabled else [],
+                   extended_activity=enabled and policy.get('extended_activity') is True)
 
 
 @dataclass
@@ -73,7 +81,7 @@ class ActivityTracker(threading.Thread):
             self.events.push(self._pending_event)
             self._pending_event = None
         self.last_error = ""
-        if not self._tracked:
+        if not self._tracked and not self.cfg.extended_activity:
             self._close_session(reason="disabled")
             return
         now, clock = current_timestamp(), time.monotonic()
@@ -145,6 +153,8 @@ class ActivityTracker(threading.Thread):
         for candidate in candidates:
             if candidate in self._tracked:
                 return candidate, self._display_name(active, candidate)
+        if self.cfg.extended_activity:
+            return automatic_application(active)
         return None
 
     @staticmethod

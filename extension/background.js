@@ -164,7 +164,11 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       await sync();
       return {ok: true, status: state};
     }
-    if (!['record', 'session', 'session-close'].includes(message.action) || !sender.tab || sender.id !== chrome.runtime.id) return {ok: false};
+    if (!['record', 'session', 'session-close'].includes(message.action) || !sender.tab || sender.id !== chrome.runtime.id
+        || !Number.isInteger(sender.tab.id) || sender.tab.id < 0 || sender.tab.incognito !== false || sender.frameId !== 0) return {ok: false};
+    let source;
+    try { source = new URL(sender.url); } catch (_) { return {ok: false}; }
+    if (!['http:', 'https:'].includes(source.protocol)) return {ok: false};
     if (message.action === 'session-close') {
       if (!validEpoch(message.employee_epoch) || !validEpoch(message.event_id)) return {ok: false};
       return checkpoint(async () => {
@@ -174,8 +178,8 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     }
     if (!plainObject(message.event) || typeof message.event.url !== 'string' || typeof sender.url !== 'string') return {ok: false};
     if (message.action === 'session' && (message.event.type !== 'web_session' || typeof message.close !== 'boolean')) return {ok: false};
-    const source = new URL(sender.url);
-    const page = new URL(message.event.url);
+    let page;
+    try { page = new URL(message.event.url); } catch (_) { return {ok: false}; }
     if (source.origin !== page.origin) return {ok: false};
     return checkpoint(async () => {
       const epoch = message.employee_epoch === undefined ? state.legacy_employee_epoch : message.employee_epoch;
@@ -225,7 +229,8 @@ chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'tracking-sync')
 function injectOpenTabs() {
   chrome.tabs.query({}, tabs => {
     for (const tab of tabs) {
-      if (!tab.id || !TrackingPrivacy.hostAllowed(tab.url || '', currentPolicy().domains)) continue;
+      if (!tab.id || tab.incognito !== false || (!TrackingPrivacy.hostAllowed(tab.url || '', currentPolicy().domains)
+          && !TrackingPrivacy.sessionUrl(tab.url || '', currentPolicy()))) continue;
       if (chrome.scripting) chrome.scripting.executeScript({target:{tabId:tab.id},files:['privacy.js','content.js']}).catch(()=>{});
       else chrome.tabs.executeScript(tab.id,{file:'privacy.js'},()=>{
         if (!chrome.runtime.lastError) chrome.tabs.executeScript(tab.id,{file:'content.js'},()=>{void chrome.runtime.lastError;});

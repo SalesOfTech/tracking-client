@@ -29,7 +29,7 @@ chrome.runtime.sendNativeMessage = (host, message, reply) => {
     const epoch = fixtureConfig.epoch || '${OLD_EPOCH}';
     const status = {error: '', version: 'fixture', identity: {company_id: 7, user_id: epoch === '${OLD_EPOCH}' ? 1 : 2, company_name: 'Synthetic company', user_name: 'Synthetic employee'},
       employee_epoch: epoch, legacy_employee_epoch: '${OLD_EPOCH}',
-      policy: {tracking: true, interactions: true, field_values: true, domains: ['work.example.test'], policy_expires_at: Math.floor(Date.now()/1000) + 3600},
+      policy: {tracking: true, interactions: true, field_values: true, domains: ['work.example.test'], policy_expires_at: Math.floor(Date.now()/1000) + 3600, ...(fixtureConfig.policy || {})},
       queue: {pending: 0, rejected: 0}, collection_reason: 'recording'};
     if (message.action === 'status') return reply({ok: true, status});
     if (message.action === 'open') return reply({ok: true});
@@ -70,6 +70,7 @@ async function launchFixture(source = path.resolve(__dirname, '..')) {
   try {
     context = await chromium.launchPersistentContext(path.join(root, 'profile'), {
       channel: process.env.PLAYWRIGHT_CHANNEL || 'chromium', headless: process.env.PLAYWRIGHT_HEADED !== '1',
+      ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? {executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH} : {}),
       viewport: {width: 960, height: 700},
       args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`, '--disable-background-networking', '--no-first-run'],
     });
@@ -224,11 +225,50 @@ async function main() {
   for (const [name, test] of [['server acknowledgement retention', retainedUntilServerConfirmation],
     ['employee switch with a lost content reply', employeeSwitchWithLostContentReply],
     ['service worker checkpoint recovery', restartRecoversCheckpoint],
-    ['real browser page focus boundary', realPageFocusBoundary]]) {
+    ['real browser page focus boundary', realPageFocusBoundary],
+    ['extended origin-only domain sessions', extendedOriginSessions]]) {
     try { await test(); console.log('PASS: ' + name); }
     catch (error) { failed = true; console.error('FAIL: ' + name, error); }
   }
   if (failed) process.exitCode = 1;
+}
+
+async function extendedOriginSessions() {
+  const fixture = await launchFixture();
+  try {
+    assert.equal(await fixture.worker.evaluate(() => chrome.runtime.getManifest().incognito), 'not_allowed');
+    await configure(fixture.worker, {policy:{extended_activity:true}});
+    await fixture.context.route(/^https:\/\/(?:first|second)\.example\.test\//, route => route.fulfill({contentType:'text/html',body:HTML}));
+    for (const domain of ['first.example.test', 'second.example.test']) {
+      const page = await fixture.context.newPage();
+      await page.goto(`https://${domain}/private-path?private-query=yes#private-fragment`);
+      await page.bringToFront();
+      await page.locator('#project').fill('Private field value');
+      await page.getByRole('button', {name:'Save changes'}).click();
+      await waitFor(() => rows(fixture.worker, 'sessions'), values => values.some(row => !row.closed && row.event.url === `https://${domain}/`
+        && row.event.end_timestamp > row.event.timestamp), 'Non-allowlisted active page must checkpoint only its origin');
+      const cdp = await fixture.context.newCDPSession(page);
+      await cdp.send('Emulation.setFocusEmulationEnabled', {enabled:false});
+      const other = await fixture.context.newPage();
+      const otherCdp = await fixture.context.newCDPSession(other);
+      await otherCdp.send('Emulation.setFocusEmulationEnabled', {enabled:false});
+      await other.bringToFront();
+      await waitFor(() => page.evaluate(() => document.hasFocus()), value => value === false, 'Extended page loses real browser focus');
+      await waitFor(() => rows(fixture.worker), values => values.some(row => row.event.url === `https://${domain}/`), 'Closed origin-only session must be durable');
+      await cdp.detach();
+      await otherCdp.detach();
+      await page.close();
+      await other.close();
+    }
+    const events = (await rows(fixture.worker)).map(row => row.event);
+    assert.deepEqual([...new Set(events.map(event => new URL(event.url).hostname))].sort(), ['first.example.test', 'second.example.test']);
+    for (const event of events) {
+      assert.equal(event.type, 'web_session');
+      assert.deepEqual(Object.keys(event).sort(), ['end_timestamp','event_id','timestamp','type','url']);
+      assert.equal(event.url, new URL(event.url).origin + '/');
+    }
+    assert.doesNotMatch(JSON.stringify(events), /private|target|title|navigation|field|click/i);
+  } finally { await fixture.close(); }
 }
 
 module.exports = {launchFixture, waitFor, rows, configure, workPage, OLD_EPOCH, NEW_EPOCH, restartRecoversCheckpoint, realPageFocusBoundary};

@@ -40,7 +40,7 @@ let preview: View = {
   receipt: {hostname: 'demo.kommo.com', timestamp: now-90, end_timestamp: now-15, confirmed_at: now-5},
   browsers: [{family: 'Chrome', version: '3.2.0', connected: true, last_seen: now}],
   domains: ['demo.kommo.com', 'docs.google.com', 'mail.google.com'], programs: ['EXCEL.EXE', 'WINWORD.EXE'],
-  policy: {tracking: true, interactions: true, field_values: true, app_inventory: true}, update: 'active',
+  policy: {tracking: true, interactions: true, field_values: true, app_inventory: true, extended_activity: params.get('extended') === '1'}, update: 'active',
   updateAvailable: params.get('mode') !== 'installer' && params.get('enroll') !== '1' && params.get('updateAvailable') !== '0',
   updateChecking: params.has('updateChecking') ? params.get('updateChecking') === '1' : params.get('update') === 'checking',
   updateCheckedAt: params.get('updateCheckedAt') === 'none' ? undefined : now - 60,

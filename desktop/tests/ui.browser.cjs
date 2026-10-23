@@ -24,8 +24,24 @@ const root = path.resolve(__dirname, '../dist');
   let browser;
   const output = process.env.TRACKING_UI_OUTPUT || path.join(require('node:os').tmpdir(), 'soft-tracking-ui');
   try {
-    browser = await chromium.launch({headless: true, ignoreDefaultArgs: ['--hide-scrollbars']});
+    browser = await chromium.launch({headless: true, ignoreDefaultArgs: ['--hide-scrollbars'],
+      ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? {executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH} : {})});
     await fs.mkdir(output, {recursive: true});
+    for (const language of ['en', 'ru', 'cs', 'uz']) {
+      const page = await browser.newPage({viewport: {width: 700, height: 620}});
+      await page.goto(`${origin}/?preview=1&lang=${language}&extended=1`);
+      const notice = page.getByRole('note');
+      await notice.waitFor();
+      assert.ok((await notice.innerText()).length > 100);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      await page.screenshot({path: path.join(output, `extended-activity-${language}.png`)});
+      await page.locator('.sidebar nav button').nth(2).click();
+      assert.equal(await page.locator('.settings-section .setting-row').count(), 6);
+      await page.goto(`${origin}/?preview=1&lang=${language}`);
+      await page.locator('.receipt-title strong').waitFor();
+      assert.equal(await page.getByRole('note').count(), 0);
+      await page.close();
+    }
     await verifyControls(browser, origin, output);
     if (process.env.TRACKING_UI_FOCUS === 'lifecycle') return;
     await verifyConnection(browser, origin, output);

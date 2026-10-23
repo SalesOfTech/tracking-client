@@ -120,7 +120,7 @@ class Controller:
             browsers=[{key: row.get(key) for key in ('family', 'version', 'connected', 'error', 'last_seen')}
                       for row in connections(self.client)],
             domains=policy.get('domains', []), programs=policy.get('track_processes', []),
-            policy={flag: bool(policy.get(flag)) for flag in ('tracking', 'interactions', 'field_values', 'app_inventory')},
+            policy={flag: bool(policy.get(flag)) for flag in ('tracking', 'interactions', 'field_values', 'app_inventory', 'extended_activity')},
             update=update['state'], updateChecking=update['busy'], updateCheckedAt=update['checked_at'],
             updateAvailable=bool(identity and self.install and (self.install / 'current.json').is_file()
                                  and not (self.install / 'uninstall-requested.json').exists()),

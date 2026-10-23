@@ -95,6 +95,7 @@ ApplicationWindow {
                         Layout.leftMargin: 28
                         Layout.rightMargin: 28
                         spacing: 0
+                        Label { visible: window.vm.extendedActivity === true; text: labels.extended_notice; color: window.colors.text; Layout.fillWidth: true; wrapMode: Text.Wrap; Layout.bottomMargin: 12 }
                         Stage { number: "01"; title: labels.company; detail: window.vm.company; complete: window.vm.enrolled || !window.vm.needsCode; Layout.fillWidth: true }
                         Entry { id: code; objectName: "companyCode"; visible: window.vm.needsCode && !window.vm.enrolled; placeholderText: labels.company_code; Layout.fillWidth: true; Layout.topMargin: 12 }
                         Stage { number: "02"; title: labels.employee; detail: window.vm.employee; complete: window.vm.enrolled; Layout.fillWidth: true }
@@ -155,6 +156,7 @@ ApplicationWindow {
                         visible: window.page === 2
                         Layout.fillWidth: true; Layout.leftMargin: 28; Layout.rightMargin: 28; spacing: 12
                         Label { text: labels.company_rules; font.pixelSize: 16; font.weight: Font.DemiBold; color:window.colors.text }
+                        Label { visible: window.vm.extendedActivity === true; text: labels.extended_notice; color: window.colors.text; Layout.fillWidth: true; wrapMode: Text.Wrap }
                         Repeater {
                             model: window.vm.policy
                             delegate: RowLayout {
