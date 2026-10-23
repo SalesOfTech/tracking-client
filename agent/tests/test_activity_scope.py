@@ -65,6 +65,17 @@ class ActivityScopeTests(unittest.TestCase):
         self.assertEqual(tracker._match_tracked_application(ActiveApplication(1, 'notepad.exe')),
                          ('notepad.exe', 'notepad.exe'))
 
+    def test_server_exclusions_never_enter_outbox(self):
+        for name in ('WindowsTerminal.exe', 'pwsh.exe', 'bash', 'fish',
+                     'google-chrome-stable', 'chromium-browser', 'firefox-esr',
+                     'microsoft-edge-stable', 'brave-browser', 'kscreenlocker_greet'):
+            with self.subTest(name=name):
+                tracker = ActivityTracker(Mock(), Mock(), TrackerConfig(extended_activity=True))
+                self.assertIsNone(tracker._match_tracked_application(ActiveApplication(
+                    1, name, executable='/Applications/' + name)))
+        self.assertIsNone(automatic_application(ActiveApplication(
+            1, 'Session', bundle_id='org.gnome.shell')))
+
     def test_disabled_or_locked_session_does_not_observe_app(self):
         platform = Mock()
         platform.is_session_active.return_value = False
@@ -82,7 +93,9 @@ class ActivityScopeTests(unittest.TestCase):
         self.assertEqual(queue.push.call_args.args[0].reason, 'disabled')
 
     def test_malformed_application_identifiers_not_collected(self):
-        for name in ('', 'x' * 256, 'bad\nname', '/private/name', 'private\\name'):
+        for name in ('', 'x' * 161, 'bad\nname', '/private/name', 'private\\name',
+                     ' leading', 'trailing ', 'a..b', 'v3-other-test', 'tool --option',
+                     'emoji-\U0001f600', '\u010d' * 81, "tool's name"):
             with self.subTest(name=name):
                 self.assertIsNone(automatic_application(ActiveApplication(1, name)))
 

@@ -1,5 +1,6 @@
 """Identifiers for optional foreground-app duration collection, never window titles."""
 from pathlib import PurePosixPath, PureWindowsPath
+import re
 
 
 SYSTEM_NAMES = frozenset({
@@ -12,6 +13,9 @@ SYSTEM_NAMES = frozenset({
     'controlcenter', 'spotlight', 'system settings', 'system preferences',
     'screencaptureui', 'notificationcenter', 'universalcontrol',
     'gnome-shell', 'plasmashell', 'xfce4-panel', 'cinnamon', 'mate-panel',
+    'cmd', 'powershell', 'pwsh', 'conhost', 'windowsterminal',
+    'bash', 'sh', 'zsh', 'dash', 'fish', 'kscreenlocker_greet',
+    'gnome-screensaver', 'xfce4-screensaver', 'xscreensaver',
     'softtracking', 'softtrackingui', 'soft tracking', 'soft-tracking',
     'soft-tracking-app', 'soft-tracking-host', 'soft-tracking-host-app',
     'softtrackingapp', 'softtrackinghostapp',
@@ -20,6 +24,8 @@ BROWSER_NAMES = frozenset({
     'chrome', 'google chrome', 'chromium', 'msedge', 'microsoft edge',
     'firefox', 'opera', 'opera gx', 'brave', 'brave browser', 'vivaldi',
     'browser', 'yandex', 'yandex browser', 'safari',
+    'google-chrome', 'google-chrome-stable', 'chromium-browser',
+    'microsoft-edge', 'microsoft-edge-stable', 'firefox-esr', 'brave-browser',
 })
 BROWSER_BUNDLES = frozenset({
     'com.google.chrome', 'org.chromium.chromium', 'com.microsoft.edgemac',
@@ -32,7 +38,17 @@ SYSTEM_BUNDLES = frozenset({
     'com.apple.calculator', 'com.apple.preview', 'com.apple.textedit',
     'com.apple.terminal', 'com.apple.activitymonitor', 'com.apple.screencaptureui',
     'com.apple.controlcenter', 'com.apple.spotlight', 'com.apple.loginwindow',
+    'com.apple.systemuiserver', 'org.gnome.shell', 'org.kde.plasmashell',
 })
+
+
+def valid_identifier(value):
+    # Match the server's wire contract before creating an outbox entry.
+    return (bool(value) and len(value.encode('utf-8')) <= 160
+            and value[0].isalnum() and value.strip() == value
+            and '..' not in value and not value.lower().startswith('v3-other-')
+            and not re.search(r'\s--?[^\W_]', value)
+            and all(char.isalnum() or char in ' ._()+-' for char in value))
 
 
 def automatic_application(active):
@@ -43,8 +59,7 @@ def automatic_application(active):
     bundle = active.bundle_id or ''
     if not name and not bundle:
         return None
-    if any(len(value) > 255 or any(ord(char) < 32 for char in value) or
-           '/' in value or '\\' in value for value in (name, bundle)):
+    if any(value and not valid_identifier(value) for value in (name, bundle)):
         return None
     stem = name.lower().removesuffix('.exe')
     process = (active.process_name or '').lower().removesuffix('.exe')
