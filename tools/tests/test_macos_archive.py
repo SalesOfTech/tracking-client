@@ -124,7 +124,7 @@ class MacOSArchiveTests(unittest.TestCase):
         release.atomic_json(installation / 'current.json', {'version': '9.8.7'})
         with patch.object(bootstrap, 'os', SimpleNamespace(name='posix')):
             launched = bootstrap.app_path(installation)
-        self.assertEqual(launched, installed / 'app/soft-tracking-app')
+        self.assertEqual(launched, (installed / 'app/soft-tracking-app').resolve())
         self.assertEqual(launched.read_bytes(), executable.read_bytes())
         self.assertTrue(launched.stat().st_mode & 0o111)
         self.assertFalse(any(path.is_symlink() for path in installed.rglob('*')))
