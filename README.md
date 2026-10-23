@@ -61,7 +61,8 @@ The macOS Python runtime uses PyInstaller onefile packaging so its versioned
 `Python.framework` symlinks survive the regular-file-only update ZIP. The executable
 paths and launcher protocol stay unchanged for existing installations. Windows
 and Linux retain their onedir runtime layout. Native macOS builds validate the
-embedded framework aliases and verify executable and installer bundle signatures
+embedded framework aliases or the standalone `libpython.dylib` runtime used by
+newer Intel Python distributions, and verify executable and installer bundle signatures
 before creating the DMG; installation and update smoke tests remain required.
 
 These integrity checks and ad-hoc signatures do **not** establish Apple trust.

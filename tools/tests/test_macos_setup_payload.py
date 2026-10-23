@@ -1,6 +1,7 @@
 """Inspect opaque POSIX installer payloads without compiling native binaries."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -36,6 +37,7 @@ class MacOSSetupPayloadTests(unittest.TestCase):
                 self.assertEqual('--onefile' in command, system == 'Darwin')
                 self.assertEqual('--onedir' in command, system != 'Darwin')
 
+    @unittest.skipIf(os.name == 'nt', 'Requires real POSIX executable permission bits')
     def test_macos_runtime_copy_preserves_launcher_path_and_executable(self):
         source, destination = self.root / 'dist', self.root / 'app'
         source.mkdir()
@@ -57,7 +59,8 @@ class MacOSSetupPayloadTests(unittest.TestCase):
             release.copy_runtime(source, destination, 'soft-tracking-app', 'macos')
         self.assertEqual(list(destination.iterdir()), [])
 
-    def test_macos_runtime_copy_rejects_symlinks_and_non_executable_files(self):
+    @unittest.skipIf(os.name == 'nt', 'Requires real POSIX executable permission bits')
+    def test_macos_runtime_copy_rejects_non_executable_files(self):
         source, destination = self.root / 'dist', self.root / 'app'
         source.mkdir()
         executable = source / 'soft-tracking-app'
@@ -65,7 +68,13 @@ class MacOSSetupPayloadTests(unittest.TestCase):
         executable.chmod(0o600)
         with self.assertRaisesRegex(ValueError, 'onefile'):
             release.copy_runtime(source, destination, executable.name, 'macos')
-        executable.chmod(0o755)
+        self.assertFalse(destination.exists())
+
+    def test_macos_runtime_copy_rejects_symlinks(self):
+        source, destination = self.root / 'dist', self.root / 'app'
+        source.mkdir()
+        executable = source / 'soft-tracking-app'
+        executable.write_bytes(b'symlink-target-fixture')
         with patch.object(Path, 'is_symlink', return_value=True), self.assertRaisesRegex(ValueError, 'onefile'):
             release.copy_runtime(source, destination, executable.name, 'macos')
         self.assertFalse(destination.exists())

@@ -1,6 +1,10 @@
 """Check the real PyInstaller archive format, without executing native binaries."""
+from contextlib import nullcontext
+import ntpath
+import os
 from pathlib import Path
 import plistlib
+import posixpath
 import subprocess
 import sys
 import tempfile
@@ -32,14 +36,33 @@ class MacOSArchiveTests(unittest.TestCase):
         ]
 
     def archive(self, entries=None):
-        from PyInstaller.archive.writers import CArchiveWriter
+        from PyInstaller.archive import writers
         path = self.root / 'soft-tracking-app'
-        CArchiveWriter(str(path), self.entries if entries is None else entries,
-                       'Python')
+        # Model a macOS archive, without changing host paths used to read fixture files.
+        writer_os = SimpleNamespace(path=posixpath, stat=os.stat)
+        with patch.object(writers, 'os', writer_os), patch.object(writers, 'is_win', False):
+            writers.CArchiveWriter(str(path), self.entries if entries is None else entries, 'Python')
         return path
 
     def test_versioned_framework_with_aliases_passes(self):
         verify_python_archive(self.archive())
+
+    def test_mac_fixture_keeps_posix_names_and_aliases_on_windows_and_msys(self):
+        from PyInstaller.archive import writers
+        from PyInstaller.archive.readers import CArchiveReader
+        for host_path in (ntpath, posixpath):
+            host_os = SimpleNamespace(path=host_path, stat=os.stat)
+            with self.subTest(host_path=host_path.__name__), \
+                    patch.object(writers, 'os', host_os), patch.object(writers, 'is_win', True):
+                executable = self.archive()
+                self.assertIs(writers.os, host_os)
+                self.assertTrue(writers.is_win)
+                archive = CArchiveReader(str(executable))
+                self.assertEqual(set(archive.toc), {entry[0] for entry in self.entries})
+                for name, target, _, typecode in self.entries:
+                    if typecode == 'n':
+                        self.assertEqual(archive.extract(name), target.encode() + b'\0')
+                verify_python_archive(executable)
 
     def test_flattened_aliases_are_rejected(self):
         for index in (2, 3, 4):
@@ -115,7 +138,18 @@ class MacOSArchiveTests(unittest.TestCase):
         executable = self.archive()
         executable.chmod(0o755)
         payload = self.root / 'payload'
-        release.copy_runtime(self.root, payload / 'app', executable.name, 'macos')
+        original_stat = Path.stat
+
+        def executable_stat(path, *args, **kwargs):
+            value = original_stat(path, *args, **kwargs)
+            if path == executable:
+                return os.stat_result((value.st_mode | 0o111, *value[1:]))
+            return value
+
+        # Windows chmod cannot express POSIX execute bits. Model only the source
+        # mode check; copying, ZIP transport, staging and validation remain real.
+        with patch.object(Path, 'stat', executable_stat) if os.name == 'nt' else nullcontext():
+            release.copy_runtime(self.root, payload / 'app', executable.name, 'macos')
         package = self.root / 'release.zip'
         release.write_payload_archive(payload, package)
         installation = self.root / 'install'
@@ -126,7 +160,8 @@ class MacOSArchiveTests(unittest.TestCase):
             launched = bootstrap.app_path(installation)
         self.assertEqual(launched, (installed / 'app/soft-tracking-app').resolve())
         self.assertEqual(launched.read_bytes(), executable.read_bytes())
-        self.assertTrue(launched.stat().st_mode & 0o111)
+        if os.name != 'nt':
+            self.assertTrue(launched.stat().st_mode & 0o111)
         self.assertFalse(any(path.is_symlink() for path in installed.rglob('*')))
         verify_python_archive(launched)
 
