@@ -84,7 +84,10 @@ def main():
                 inspect_command(['codesign', '-dv', '--verbose=4', payload / 'app/soft-tracking-app'])
                 dmg = directory / 'SOFT-Tracking-Setup.dmg'
                 with zipfile.ZipFile(bundle) as archive:
-                    with archive.open(TARGET + '/SOFT-Tracking-Setup.dmg') as source, dmg.open('xb') as output:
+                    setup_name = json.loads(archive.read(TARGET + '/setup.json'))['file']
+                    if setup_name != 'SOFT-Tracking-Setup-' + version + '.dmg':
+                        raise ValueError('Unexpected installer filename')
+                    with archive.open(TARGET + '/' + setup_name) as source, dmg.open('xb') as output:
                         shutil.copyfileobj(source, output)
                 # Model a downloaded file without removing quarantine or weakening Gatekeeper.
                 # This is an explicit policy assessment, not a real Chrome/Finder consent flow.
