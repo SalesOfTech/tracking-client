@@ -1,6 +1,11 @@
 name: macOS ARM sealed engine pilot
 on:
   workflow_dispatch:
+    inputs:
+      existing_pilot:
+        description: Optional existing draft pilot tag; verify the exact built DMG without rebuilding
+        type: string
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -14,7 +19,7 @@ env:
   PYTHONPATH: ${{ github.workspace }}/agent
 jobs:
   build:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.existing_pilot == ''
     runs-on: macos-14
     timeout-minutes: 60
     permissions:
@@ -68,6 +73,9 @@ jobs:
           printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
   verify:
     needs: build
+    if: always() && github.ref == 'refs/heads/main' && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.existing_pilot != ''))
+    permissions:
+      contents: write # Draft releases are hidden from a read-only installation token.
     strategy:
       fail-fast: false
       matrix:
@@ -86,14 +94,32 @@ jobs:
       - name: Download exact draft DMG
         env:
           GH_TOKEN: ${{ github.token }}
-          PILOT_TAG: ${{ needs.build.outputs.tag }}
+          PILOT_TAG: ${{ inputs.existing_pilot || needs.build.outputs.tag }}
         run: |
+          python - <<'PY'
+          import json, os, re, subprocess
+          tag = os.environ['PILOT_TAG']
+          match = re.fullmatch(r'macos-arm-pilot-3\.5\.2-rc\.1-(\d+)-(\d+)', tag)
+          assert match, 'Not an ARM pilot tag'
+          def api(path):
+              return json.loads(subprocess.check_output(['gh', 'api', 'repos/' + os.environ['GITHUB_REPOSITORY'] + path]))
+          releases = api('/releases?per_page=100')
+          release = next(item for item in releases if item['tag_name'] == tag)
+          assert release['draft'] and release['prerelease'], 'Expected a draft pilot'
+          run = api('/actions/runs/' + match[1])
+          assert run['path'] == '.github/workflows/macos-arm-pilot.yml', 'Unexpected source workflow'
+          assert run['head_sha'] == release['target_commitish'], 'Pilot source mismatch'
+          jobs = api('/actions/runs/' + match[1] + '/attempts/' + match[2] + '/jobs')['jobs']
+          assert any(job['name'] == 'build' and job['conclusion'] == 'success' for job in jobs), 'Native build acceptance did not pass'
+          assert {item['name'] for item in release['assets']} == {'SOFT-Tracking-Setup.dmg', 'SOFT-Tracking-Setup.dmg.sha256'}
+          PY
           gh release download "$PILOT_TAG" --dir "$RUNNER_TEMP/pilot" --pattern 'SOFT-Tracking-Setup.dmg*'
           (cd "$RUNNER_TEMP/pilot" && shasum -a 256 -c SOFT-Tracking-Setup.dmg.sha256)
       - name: Native installed runtime and administrator fallback acceptance
         run: python tools/smoke_macos_pilot.py "$RUNNER_TEMP/pilot/SOFT-Tracking-Setup.dmg"
   publish-pilot:
     needs: [build, verify]
+    if: always() && github.ref == 'refs/heads/main' && needs.verify.result == 'success'
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -102,6 +128,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          PILOT_TAG: ${{ needs.build.outputs.tag }}
+          PILOT_TAG: ${{ inputs.existing_pilot || needs.build.outputs.tag }}
         run: |
           gh release edit "$PILOT_TAG" --draft=false --prerelease --latest=false --notes "ARM-only installation pilot 3.5.2-rc.1. Exact DMG passed native installed runtime, native messaging, mounted setup and explicit administrator trust fallback checks on GitHub macOS 14/15/26 ARM runners. Physical M1 and next-release live update testing remain pending. Requires macOS 13+. Unsigned developer identity: not Apple-notarized, explicit trust may be required. Windows/Linux/Intel, stable release, widget and production update feed are unchanged."
