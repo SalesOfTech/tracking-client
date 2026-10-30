@@ -47,7 +47,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="macos-arm-package-3.5.2-rc.2-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          tag="macos-arm-package-3.5.2-rc.3-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           gh release create "$tag" --target "$GITHUB_SHA" --draft --prerelease --title 'macOS ARM single-PKG pilot' --notes 'Single Apple Installer document. Native verification pending; not stable. Apple trust approval may be required.'
           gh release upload "$tag" "$RUNNER_TEMP/package/SOFT-Tracking-Setup-ARM.pkg" "$RUNNER_TEMP/package/SOFT-Tracking-Setup-ARM.pkg.sha256"
           printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
@@ -99,4 +99,4 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.build.outputs.tag }}
         run: |
-          gh release edit "$TAG" --draft=false --prerelease --latest=false --notes 'Single .pkg opened by Apple Installer. Prepares and opens the normal SOFT key-entry window under the logged-in user; enter an employee key and click Install to install the agent. Contains the pinned 3.5.2-rc.2 ARM app. Native package execution, normal GUI readiness and temporary cleanup passed on macOS 14/15/26 ARM CI. Not notarized: Open Anyway may be required. Automated Gatekeeper consent, physical M1 installation and production-key enrollment are NOT verified. Stable release, widget and update feeds unchanged.'
+          gh release edit "$TAG" --draft=false --prerelease --latest=false --notes 'Single .pkg opened by Apple Installer. Prepares and opens the normal SOFT key-entry window under the logged-in user; enter an employee key and click Install to install the agent. Contains the pinned 3.5.2-rc.3 ARM app. Native package execution, normal GUI readiness and temporary cleanup passed on macOS 14/15/26 ARM CI. Not notarized: Open Anyway may be required. Automated Gatekeeper consent, physical M1 installation and production-key enrollment are NOT verified. Stable release, widget and update feeds unchanged.'

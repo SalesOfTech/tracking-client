@@ -10,8 +10,8 @@ import urllib.request
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_TAG = 'macos-arm-pilot-3.5.2-rc.2-41069945722-1'
-SOURCE_SHA256 = 'c647a35a0c5aefff6cda6c826ca3c1145c91db6cdb3fac826a4e5e240be93334'
+SOURCE_TAG = 'macos-arm-pilot-3.5.2-rc.3-41093512076-1'
+SOURCE_SHA256 = '3473783093b043936066d9f2b318c54e96727309e41e846fd1d979a773ffbaaa'
 IDENTIFIER = 'com.soft.tracking.setup.arm-pilot'
 PACKAGE_NAME = 'SOFT-Tracking-Setup-ARM.pkg'
 

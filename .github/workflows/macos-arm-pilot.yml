@@ -93,7 +93,7 @@ jobs:
           printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
   verify:
     needs: build
-    if: always() && github.ref == 'refs/heads/main' && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.existing_pilot != ''))
+    if: always() && !cancelled() && github.ref == 'refs/heads/main' && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.existing_pilot != ''))
     permissions:
       contents: write # Draft releases are hidden from a read-only installation token.
     strategy:
@@ -115,6 +115,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PILOT_TAG: ${{ inputs.existing_pilot || needs.build.outputs.tag }}
+          EXISTING_PILOT: ${{ inputs.existing_pilot }}
         run: |
           python - <<'PY'
           import json, os, re, subprocess
@@ -125,7 +126,7 @@ jobs:
               return json.loads(subprocess.check_output(['gh', 'api', 'repos/' + os.environ['GITHUB_REPOSITORY'] + path]))
           releases = api('/releases?per_page=100')
           release = next(item for item in releases if item['tag_name'] == tag)
-          assert release['draft'] and release['prerelease'], 'Expected a draft pilot'
+          assert release['prerelease'] and (release['draft'] or os.environ['EXISTING_PILOT'] == tag), 'Expected a draft or explicitly selected pilot'
           run = api('/actions/runs/' + match[1])
           assert run['path'] == '.github/workflows/macos-arm-pilot.yml', 'Unexpected source workflow'
           assert run['head_sha'] == release['target_commitish'], 'Pilot source mismatch'
@@ -151,7 +152,7 @@ jobs:
           if-no-files-found: ignore
   publish-pilot:
     needs: [build, verify]
-    if: always() && github.ref == 'refs/heads/main' && needs.verify.result == 'success'
+    if: always() && !cancelled() && github.ref == 'refs/heads/main' && needs.verify.result == 'success'
     runs-on: ubuntu-22.04
     permissions:
       contents: write
