@@ -1,0 +1,77 @@
+#!/bin/bash -p
+set -u
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+umask 077
+
+fail() {
+    printf '%s\n' "$1" >&2
+    exit 1
+}
+
+(( EUID == 0 && UID == 0 )) || fail STP_E_ROOT
+[[ ${3:-} == / ]] || fail STP_E_VOLUME
+
+console=$(/usr/bin/stat -f '%u:%Su' /dev/console 2>/dev/null) || fail STP_E_CONSOLE
+[[ "$console" =~ ^([1-9][0-9]{2,8}):([a-zA-Z_][a-zA-Z0-9_.-]*)$ ]] || fail STP_E_CONSOLE
+console_uid=${BASH_REMATCH[1]}
+console_user=${BASH_REMATCH[2]}
+(( console_uid >= 501 )) || fail STP_E_CONSOLE
+[[ "$console_user" != root && "$console_user" != loginwindow ]] || fail STP_E_CONSOLE
+[[ $(/usr/bin/id -u "$console_user" 2>/dev/null) == "$console_uid" ]] || fail STP_E_CONSOLE
+/bin/launchctl print "gui/$console_uid" >/dev/null 2>&1 || fail STP_E_CONSOLE
+
+as_user() {
+    /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        /bin/launchctl asuser "$console_uid" /usr/bin/sudo -H -u "$console_user" "$@"
+}
+
+rootstage=''
+userdir=''
+submitted=0
+cleanup() {
+    local status=$?
+    trap - EXIT
+    trap '' HUP INT TERM
+    if [[ -n "$userdir" && "$submitted" == 0 ]]; then
+        as_user /bin/bash "$rootstage/user-prepare" --cleanup "$userdir" >/dev/null 2>&1 \
+            || { printf '%s\n' STP_E_USER_CLEANUP >&2; status=1; }
+    fi
+    if [[ -n "$rootstage" ]]; then
+        /bin/rm -rf -- "$rootstage" >/dev/null 2>&1 \
+            || { printf '%s\n' STP_E_ROOT_CLEANUP >&2; status=1; }
+    fi
+    exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+script_dir=$(CDPATH='' cd -- "$(/usr/bin/dirname -- "$0")" && pwd -P) || fail STP_E_LOCATION
+source_app="$script_dir/SOFT-Tracking-Setup.app"
+[[ -d "$source_app" && ! -L "$source_app" ]] || fail STP_E_PAYLOAD
+for helper in user-prepare runner.sh; do
+    [[ -f "$script_dir/$helper" && ! -L "$script_dir/$helper" ]] || fail STP_E_PAYLOAD
+done
+rootstage=$(/usr/bin/mktemp -d /private/tmp/SOFTTrackingPackage.XXXXXX 2>/dev/null) || fail STP_E_TEMP
+[[ -d "$rootstage" && ! -L "$rootstage" && -O "$rootstage" ]] || fail STP_E_TEMP
+/usr/bin/ditto "$source_app" "$rootstage/SOFT-Tracking-Setup.app" >/dev/null 2>&1 || fail STP_E_COPY
+/bin/cp "$script_dir/user-prepare" "$script_dir/runner.sh" "$rootstage/" >/dev/null 2>&1 || fail STP_E_COPY
+# ditto can preserve ownership. Only this root-created, still-private stage is changed.
+/usr/sbin/chown -R -P root:wheel "$rootstage" >/dev/null 2>&1 || fail STP_E_STAGE
+/usr/bin/codesign --verify --deep --strict "$rootstage/SOFT-Tracking-Setup.app" >/dev/null 2>&1 \
+    || fail STP_E_SIGNATURE
+/bin/chmod -R -P a+rX,go-w "$rootstage" >/dev/null 2>&1 || fail STP_E_STAGE
+
+userdir=$(as_user /bin/bash "$rootstage/user-prepare" \
+    "$rootstage/SOFT-Tracking-Setup.app" "$rootstage/runner.sh") || fail STP_E_PREPARE
+[[ -n "$userdir" && "$userdir" == /* && "$userdir" != *$'\n'* ]] || fail STP_E_USER_PATH
+# Recheck both the console identity and GUI domain after the potentially long copy.
+[[ $(/usr/bin/stat -f '%u:%Su' /dev/console 2>/dev/null) == "$console" ]] || fail STP_E_CONSOLE_CHANGED
+[[ $(/usr/bin/id -u "$console_user" 2>/dev/null) == "$console_uid" ]] || fail STP_E_CONSOLE_CHANGED
+/bin/launchctl print "gui/$console_uid" >/dev/null 2>&1 || fail STP_E_CONSOLE_CHANGED
+label="com.soft.tracking.setup.$console_uid.${rootstage##*.}"
+as_user /bin/launchctl submit -l "$label" -- /bin/bash "$userdir/runner.sh" "$userdir" "$label" \
+    >/dev/null 2>&1 || fail STP_E_SUBMIT
+submitted=1
+printf '%s\n' STP_OK_SUBMITTED

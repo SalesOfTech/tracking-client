@@ -1,0 +1,102 @@
+name: macOS ARM single PKG pilot
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: macos-arm-package
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.upload.outputs.tag }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+          architecture: arm64
+      - run: python -m pip install -r agent/requirements-build.txt
+      - name: Package regression tests
+        env:
+          PYTHONPATH: agent
+        run: python -m unittest discover -s tools/tests -p 'test_macos_pkg*.py' -v
+      - name: Package pinned ARM application without rebuilding other platforms
+        env:
+          PYTHONPATH: agent
+        run: python tools/macos_pkg.py "$RUNNER_TEMP/package"
+      - name: Real package and normal key-entry GUI acceptance
+        run: python tools/smoke_macos_pkg.py "$RUNNER_TEMP/package/SOFT-Tracking-Setup-ARM.pkg" "$RUNNER_TEMP/evidence"
+      - name: Retain GUI evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pkg-gui-macos-15
+          path: ${{ runner.temp }}/evidence
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: Upload exact package to non-latest draft
+        id: upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="macos-arm-package-3.5.2-rc.2-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          gh release create "$tag" --target "$GITHUB_SHA" --draft --prerelease --title 'macOS ARM single-PKG pilot' --notes 'Single Apple Installer document. Native verification pending; not stable. Apple trust approval may be required.'
+          gh release upload "$tag" "$RUNNER_TEMP/package/SOFT-Tracking-Setup-ARM.pkg" "$RUNNER_TEMP/package/SOFT-Tracking-Setup-ARM.pkg.sha256"
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+  verify:
+    needs: build
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-14, macos-26]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+          architecture: arm64
+      - run: python -m pip install psutil==6.1.1
+      - name: Download and verify exact draft package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          gh release download "$TAG" --dir "$RUNNER_TEMP/package" --pattern 'SOFT-Tracking-Setup-ARM.pkg*'
+          (cd "$RUNNER_TEMP/package" && shasum -a 256 -c SOFT-Tracking-Setup-ARM.pkg.sha256)
+      - name: Normal key-entry GUI and cleanup acceptance
+        run: python tools/smoke_macos_pkg.py "$RUNNER_TEMP/package/SOFT-Tracking-Setup-ARM.pkg" "$RUNNER_TEMP/evidence"
+      - name: Retain GUI evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pkg-gui-${{ matrix.runner }}
+          path: ${{ runner.temp }}/evidence
+          retention-days: 7
+          if-no-files-found: ignore
+  publish:
+    needs: [build, verify]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Publish ARM-only package pilot, never change stable
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          gh release edit "$TAG" --draft=false --prerelease --latest=false --notes 'Single .pkg opened by Apple Installer. Prepares and opens the normal SOFT key-entry window under the logged-in user; enter an employee key and click Install to install the agent. Contains the pinned 3.5.2-rc.2 ARM app. Native package execution, normal GUI readiness and temporary cleanup passed on macOS 14/15/26 ARM CI. Not notarized: Open Anyway may be required. Automated Gatekeeper consent, physical M1 installation and production-key enrollment are NOT verified. Stable release, widget and update feeds unchanged.'
