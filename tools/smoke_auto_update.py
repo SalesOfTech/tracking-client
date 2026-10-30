@@ -241,6 +241,9 @@ class OriginHandler(QuietHandler):
             fixture.record('events')
             # Deliberately no server ACK: pending custody must survive the upgrade.
             self.reply(503)
+        elif self.path == '/client/v3/lifecycle':
+            fixture.record('lifecycle')
+            self.reply(200, b'{"ok":true,"accepted":[]}')
         else:
             fixture.record('unexpected')
             self.reply(404)

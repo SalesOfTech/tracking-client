@@ -243,6 +243,20 @@ class HarnessTests(unittest.TestCase):
         self.assertTrue(fixture.seen('download_complete'))
         self.assertFalse(any(thread.name == 'auto-update-fixture' for thread in threading.enumerate()))
 
+    def test_lifecycle_is_normal_authenticated_traffic_without_activity_ack(self):
+        cert, tls, fixture = self.fixture()
+        with smoke.local_server(fixture, tls) as proxy:
+            session = self.session(proxy, cert)
+            url = 'https://' + smoke.HOSTS[0] + '/client/v3/lifecycle'
+            response = session.post(url, json={'events': [{'event_id': 'fixture', 'type': 'agent_started'}]}, timeout=5)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {'ok': True, 'accepted': []})
+            self.assertTrue(fixture.seen('lifecycle'))
+            self.assertFalse(fixture.seen('unexpected'))
+            self.assertFalse(fixture.seen('events'))
+            session.headers.pop('Authorization')
+            self.assertEqual(session.post(url, timeout=5).status_code, 401)
+
     def test_subprocess_uses_requests_environment_without_disabling_validation(self):
         cert, tls, fixture = self.fixture()
         with smoke.local_server(fixture, tls) as proxy:
