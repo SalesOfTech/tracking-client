@@ -9,7 +9,7 @@ import psutil
 from smoke_helpers import run_frozen
 
 
-def probe_launch(app, directory, inspect_command):
+def probe_launch(app, directory, inspect_command, launch_argument='--health-check'):
     app = Path(app)
     directory = Path(directory)
     metadata = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
@@ -25,7 +25,7 @@ def probe_launch(app, directory, inspect_command):
     inspect_command(['open', '-h'])
     directory.mkdir(parents=True, exist_ok=True)
     home = directory / 'launch-home'
-    home.mkdir()
+    (home / 'Library/Caches').mkdir(parents=True)
     temporary = directory / 'launch-tmp'
     temporary.mkdir()
     results = []
@@ -33,11 +33,13 @@ def probe_launch(app, directory, inspect_command):
         marker = directory / (method + '-health.json')
         env = dict(os.environ, HOME=str(home), TMPDIR=str(temporary) + '/',
                    SOFT_TRACKING_HEALTH=str(marker), PYTHONNOUSERSITE='1')
-        args = [str(executable), '--health-check']
+        args = [str(executable), launch_argument]
         if method == 'launchservices':
             args = ['open', '-n', '-W', '--env', 'SOFT_TRACKING_HEALTH=' + str(marker),
                     '--env', 'HOME=' + str(home), '--env', 'TMPDIR=' + str(temporary) + '/',
-                    '-a', str(app), '--args', '--health-check']
+                    '--stdout', str(directory / 'launch-stdout.log'),
+                    '--stderr', str(directory / 'launch-stderr.log'),
+                    '-a', str(app), '--args', launch_argument]
         try:
             result = run_frozen(args, env, timeout=120)
             outcome = {'launch_method': method, 'exit_code': result.returncode,
@@ -65,6 +67,11 @@ def probe_launch(app, directory, inspect_command):
             psutil.wait_procs(alive, timeout=10)
         results.append(outcome)
         print(json.dumps(outcome), flush=True)
+        if method == 'launchservices':
+            for name in ('launch-stdout.log', 'launch-stderr.log'):
+                path = directory / name
+                if path.exists():
+                    print(name + ': ' + path.read_text(errors='replace')[-6000:], flush=True)
     return results
 
 

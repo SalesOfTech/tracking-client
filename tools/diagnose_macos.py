@@ -22,6 +22,8 @@ PINS = {
     '3.5.1': '02af4290d51dfd25f6e9c605216830baa1a1d691999e39869fbcc328cca8e361',
 }
 KEYS = {'pilot-2026': 'CZ2p3MojEDv9sgCmxjJZCxGrR2q2bYO8bBZ04XS0EPw='}
+PILOT_TAG = 'macos-arm-pilot-3.5.2-rc.2-41069945722-1'
+PILOT_SHA256 = 'c647a35a0c5aefff6cda6c826ca3c1145c91db6cdb3fac826a4e5e240be93334'
 sys.path.insert(0, str(ROOT / 'agent'))
 from agent_tracker.core.signed_updates import stage_archive
 from smoke_published import stage_published_archive
@@ -129,6 +131,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--historical', action='store_true')
     parser.add_argument('--quarantine', action='store_true')
+    parser.add_argument('--pilot', action='store_true')
     args = parser.parse_args()
     if args.historical:
         return historical_main()
@@ -140,23 +143,30 @@ def main():
     results = {}
     with tempfile.TemporaryDirectory(prefix='tracking-macos-launch-') as folder:
         root = Path(folder)
-        bundle = download('3.5.1', root)
         dmg = root / 'SOFT-Tracking-Setup.dmg'
-        with zipfile.ZipFile(bundle) as archive:
-            metadata = json.loads(archive.read(TARGET + '/setup.json'))
-            name = metadata['file']
-            if name != 'SOFT-Tracking-Setup-3.5.1.dmg':
-                raise ValueError('Unexpected installer filename')
-            with archive.open(TARGET + '/' + name) as source, dmg.open('xb') as output:
+        if args.pilot:
+            url = 'https://github.com/SalesOfTech/tracking-client/releases/download/' + PILOT_TAG + '/' + dmg.name
+            with urllib.request.urlopen(url, timeout=60) as source, dmg.open('xb') as output:
                 shutil.copyfileobj(source, output)
-        if hashlib.sha256(dmg.read_bytes()).hexdigest() != metadata['sha256']:
+            expected_digest = PILOT_SHA256
+        else:
+            bundle = download('3.5.1', root)
+            with zipfile.ZipFile(bundle) as archive:
+                metadata = json.loads(archive.read(TARGET + '/setup.json'))
+                name = metadata['file']
+                if name != 'SOFT-Tracking-Setup-3.5.1.dmg':
+                    raise ValueError('Unexpected installer filename')
+                with archive.open(TARGET + '/' + name) as source, dmg.open('xb') as output:
+                    shutil.copyfileobj(source, output)
+            expected_digest = metadata['sha256']
+        if hashlib.sha256(dmg.read_bytes()).hexdigest() != expected_digest:
             raise ValueError('Installer digest mismatch')
         if args.quarantine:
             # Separate CI machines avoid approval/LaunchServices caches from a previous local launch.
             subprocess.run(['xattr', '-w', 'com.apple.quarantine',
                             '0083;' + format(int(time.time()), 'x') + ';Chrome;' + str(uuid.uuid4()),
                             str(dmg)], check=True)
-        print(json.dumps({'version': '3.5.1', 'download_quarantine': args.quarantine}), flush=True)
+        print(json.dumps({'version': PILOT_TAG if args.pilot else '3.5.1', 'download_quarantine': args.quarantine}), flush=True)
         inspect_command(['spctl', '--assess', '--type', 'open', '--context',
                          'context:primary-signature', '--verbose=4', dmg])
         mount = root / 'mount'
@@ -167,12 +177,16 @@ def main():
             apps = list(mount.glob('*.app'))
             if len(apps) != 1:
                 raise ValueError('Unexpected installer disk image')
-            verify_frozen(apps[0] / 'Contents/MacOS/SOFT-Tracking-Setup', apps[0])
+            if args.pilot:
+                subprocess.run(['codesign', '--verify', '--deep', '--strict', str(apps[0])], check=True)
+            else:
+                verify_frozen(apps[0] / 'Contents/MacOS/SOFT-Tracking-Setup', apps[0])
             inspect_command(['spctl', '--assess', '--type', 'execute', '--verbose=4', apps[0]])
-            results['mounted_dmg'] = probe_launch(apps[0], root / 'mounted-probe', inspect_command)
+            argument = '--setup-launch-self-test' if args.pilot else '--health-check'
+            results['mounted_dmg'] = probe_launch(apps[0], root / 'mounted-probe', inspect_command, argument)
             copied = root / apps[0].name
             subprocess.run(['ditto', str(apps[0]), str(copied)], check=True)
-            results['copied_app'] = probe_launch(copied, root / 'copied-probe', inspect_command)
+            results['copied_app'] = probe_launch(copied, root / 'copied-probe', inspect_command, argument)
             inspect_command(['log', 'show', '--last', '8m', '--style', 'compact', '--predicate',
                              '(process == "syspolicyd" OR process == "lsd" OR process == "amfid") '
                              'AND (eventMessage CONTAINS[c] "SOFT" OR eventMessage CONTAINS[c] "Python")'])
