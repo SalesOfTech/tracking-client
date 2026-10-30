@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT / 'agent'))
 from agent_tracker.core.signed_updates import stage_archive
 from smoke_published import stage_published_archive
 from macos_archive import verify_frozen
+from macos_launch_diagnostics import probe_launch
 
 
 def inspect_command(args):
@@ -106,6 +107,9 @@ def main():
                         raise ValueError('Unexpected installer disk image')
                     inspect_command(['codesign', '--verify', '--deep', '--strict', apps[0]])
                     inspect_command(['spctl', '--assess', '--type', 'execute', '--verbose=4', apps[0]])
+                    copied = directory / apps[0].name
+                    subprocess.run(['ditto', str(apps[0]), str(copied)], check=True)
+                    probe_launch(copied, directory, inspect_command)
                 finally:
                     subprocess.run(['hdiutil', 'detach', str(mount)], check=True, timeout=30)
             bundle.unlink()
