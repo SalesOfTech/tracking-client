@@ -411,6 +411,35 @@ class GateTests(unittest.TestCase):
                 self.assertEqual([call.args[0][2] for call in run.call_args_list], [str(root / old) for old in versions])
                 self.assertTrue(all(call.args[0][-1] == '--published' and call.kwargs['check'] for call in run.call_args_list))
 
+    def test_macos_352_downloads_only_exact_candidate_without_baseline_secret(self):
+        row = next(row for row in gate.TARGETS if row['target'] == 'macos-arm64-modern')
+        root = self.root / 'fresh-download'
+        name = 'SOFT-Tracking-macos-arm64-modern-3.5.2.zip'
+        plan = dict(self.plan, version='3.5.2', assets={
+            name: {'id': 1, 'sha256': 'a' * 64, 'size': 10},
+            name + '.sha256': {'id': 2, 'sha256': 'b' * 64, 'size': 100}})
+        api = Mock()
+
+        def asset(identifier, destination, expected, size):
+            if identifier == 2:
+                destination.write_text('a' * 64 + '  ' + name, encoding='ascii')
+
+        api.asset.side_effect = asset
+        with patch.object(gate, 'VERSION', '3.5.2'), patch.object(gate, 'read_plan', return_value=plan), \
+                patch.object(gate, 'row_for_target', return_value=row), \
+                patch.object(gate, 'check_native'), patch.object(gate, 'revalidate'), \
+                patch.object(gate, 'GitHub', return_value=api), \
+                patch.object(gate, 'private_root', return_value=root), \
+                patch.dict(os.environ, TRACKING_BASELINE_URLS=''), \
+                patch.object(gate, 'download_baseline') as old, \
+                patch.object(gate, 'stage_candidate') as current, \
+                patch.object(gate, 'stage_published_archive') as stage:
+            gate.download()
+        old.assert_not_called()
+        stage.assert_not_called()
+        self.assertEqual(api.asset.call_count, 2)
+        current.assert_called_once_with(root / name, root / 'current', row, plan)
+
     def test_delegated_download_never_sends_auth_or_follows_redirect(self):
         response = Mock(status_code=200)
         response.iter_content.return_value = [b'fixture']
@@ -752,7 +781,7 @@ class GateTests(unittest.TestCase):
                 path, _ = self.signed_bundle(row=row, version='3.5.1')
                 gate.stage_candidate(path, self.root / row['target'], row, self.plan)
 
-    def test_cold_pkg_precedes_every_genuine_upgrade_on_both_macs(self):
+    def test_macos_352_is_fresh_pkg_and_installed_runtime_without_old_upgrades(self):
         console_home = str(self.root / 'console-home')
         for row in gate.TARGETS:
             if not row['target'].startswith('macos-'):
@@ -774,7 +803,7 @@ class GateTests(unittest.TestCase):
                                    TRACKING_BASELINE_URLS='private-value', PYTHONOPTIMIZE='1'), \
                         patch.object(gate.subprocess, 'run') as run, redirect_stdout(io.StringIO()):
                     gate.test()
-                cold, *upgrades = run.call_args_list
+                cold, fresh = run.call_args_list
                 self.assertEqual(cold.args[0], [sys.executable, str(ROOT / 'candidate/tools/smoke_macos_pkg.py'),
                                  str(root / 'current/SOFT-Tracking-Setup-3.5.2.pkg'),
                                  str(root / 'pkg-evidence'), '--require-cold'])
@@ -789,14 +818,18 @@ class GateTests(unittest.TestCase):
                     self.assertTrue(call.kwargs['check'])
                     self.assertEqual(call.kwargs['stderr'], subprocess.STDOUT)
                     self.assertTrue(Path(call.kwargs['stdout'].name).is_relative_to(root))
-                manual = [call for call in upgrades if Path(call.args[0][1]).name == 'smoke_update.py']
-                automatic = [call for call in upgrades if Path(call.args[0][1]).name == 'smoke_auto_update.py']
-                self.assertEqual([call.args[0][2] for call in manual],
-                                 [str(root / old) for old in gate.upgrade_baselines('3.5.2')])
-                self.assertTrue(all(call.args[0][-1] == '--published' for call in manual))
-                self.assertEqual([call.args[0][2] for call in automatic],
-                                 [str(root / old) for old in ('3.5.1', '3.5.0', '3.4.2')])
-                self.assertTrue(all(call.kwargs['env']['HOME'] == str(root / 'home') for call in upgrades))
+                self.assertEqual(fresh.args[0], [sys.executable, str(ROOT / 'candidate/tools/smoke_package.py'),
+                                                str(root / 'current/setup-payload')])
+                self.assertEqual(fresh.kwargs['env']['HOME'], str(root / 'home'))
+
+    def test_fresh_baseline_exception_is_only_for_macos_352(self):
+        for version in ('3.5.1', '3.5.2', '3.5.3'):
+            for row in gate.TARGETS:
+                with self.subTest(version=version, target=row['target']), patch.object(gate, 'VERSION', version), \
+                        patch.object(gate, 'upgrade_baselines', return_value=['previous']) as baselines:
+                    fresh = version == '3.5.2' and row['target'].startswith('macos-')
+                    self.assertEqual(gate.target_baselines(row), [] if fresh else ['previous'])
+                    self.assertEqual(baselines.call_count, 0 if fresh else 1)
 
     def test_cold_pkg_failure_or_timeout_stops_all_upgrades_and_is_sanitized(self):
         row = next(row for row in gate.TARGETS if row['target'] == 'macos-arm64-modern')

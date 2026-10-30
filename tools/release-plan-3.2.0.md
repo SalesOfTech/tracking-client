@@ -69,6 +69,14 @@ acceptance run/attempt/actors are recorded alongside it.
 
 ## Actual Baseline Tests
 
+For **macOS 3.5.2 only**, the approved deployment starts with a fresh PKG
+installation. Its native Intel/ARM jobs and extra macOS 15/26 ARM jobs do not
+download or run historical macOS baselines. They require the exact verified PKG,
+cold PKG GUI installation, and isolated installed-runtime/package smoke checks.
+Windows and Linux retain all genuine baseline and automatic-update checks.
+The macOS **3.5.2 to next release** automatic-update test belongs to that next
+release and is not claimed by 3.5.2 acceptance.
+
 The downloader and original published-package path share
 `smoke_published.stage_published_archive()`. The original private script is not
 modified. Every required genuine version runs on each matching native runner using the

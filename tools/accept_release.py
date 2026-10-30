@@ -454,6 +454,13 @@ def stage_candidate(path, destination, row, plan):
     return manifest
 
 
+def target_baselines(row):
+    # macOS 3.5.2 is the approved fresh-install baseline, not an old-client rollout.
+    if VERSION == '3.5.2' and row['target'].startswith('macos-'):
+        return []
+    return upgrade_baselines(VERSION)
+
+
 def download():
     global STAGE
     plan, row = read_plan(), row_for_target()
@@ -461,7 +468,8 @@ def download():
     api = GitHub()
     revalidate(api, plan)
     raw = os.environ.pop('TRACKING_BASELINE_URLS', '')
-    urls = baseline_urls(raw)
+    baselines = target_baselines(row)
+    urls = baseline_urls(raw) if baselines else {}
     for slots in urls.values():
         for slot in slots.values():
             # Register each URL, because GitHub cannot redact JSON substrings reliably.
@@ -469,7 +477,7 @@ def download():
     root = private_root()
     root.mkdir(mode=0o700)
     pins = json_value((ROOT / 'tools/upgrade-baselines.json').read_bytes())
-    for old in upgrade_baselines(VERSION):
+    for old in baselines:
         STAGE = 'baseline-' + old
         pin = pins[old][row['target']]
         download_baseline(api, old, row['target'], pin, urls, root / (old + '.zip'))
@@ -481,7 +489,7 @@ def download():
         api.asset(asset['id'], root / filename, asset['sha256'], asset['size'])
     require((root / (name + '.sha256')).read_text(encoding='ascii').strip() == plan['assets'][name]['sha256'] + '  ' + name)
     stage_candidate(root / name, root / 'current', row, plan)
-    for old in upgrade_baselines(VERSION):
+    for old in baselines:
         STAGE = 'baseline-' + old
         stage_published_archive(root / (old + '.zip'), root / old / 'setup-payload', old, row['target'],
                                 plan['trusted_keys'], {'os': row['target'].split('-')[0], 'architecture': row['arch']})
@@ -543,6 +551,8 @@ def test():
     if row['target'].startswith('macos-') and tuple(map(int, VERSION.split('.'))) >= (3, 5, 2):
         build = json_value((root / 'current/setup-payload/setup-build.json').read_bytes())
         installer = installer_filename(VERSION, build)
+        if VERSION == '3.5.2':
+            require(installer.endswith('.pkg'))
         if installer.endswith('.pkg'):
             import pwd
             STAGE = 'cold-pkg'
@@ -566,7 +576,22 @@ def test():
                 STAGE += '-process-timeout'
                 raise
             print(row['target'] + ' cold PKG PASS', flush=True)
-    for old in upgrade_baselines(VERSION):
+    if VERSION == '3.5.2' and row['target'].startswith('macos-'):
+        STAGE = 'fresh-installed-runtime'
+        try:
+            with (root / 'fresh-installed-runtime.private.log').open('wb') as log:
+                subprocess.run([sys.executable, str(ROOT / 'candidate/tools/smoke_package.py'),
+                                str(root / 'current/setup-payload')], env=env, cwd=root,
+                               stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                               timeout=900, check=True)
+        except subprocess.CalledProcessError:
+            STAGE += '-subprocess-failure'
+            raise
+        except subprocess.TimeoutExpired:
+            STAGE += '-process-timeout'
+            raise
+        print(row['target'] + ' fresh installed runtime PASS', flush=True)
+    for old in target_baselines(row):
         STAGE = 'upgrade-' + old
         path = root / (old + '.private.log')
         try:
@@ -693,7 +718,13 @@ def promote():
         require(tag is not None and release.get('draft') is True and release.get('tag_name') == 'v' + VERSION)
     root = private_root()
     root.mkdir(mode=0o700)
-    body = ('Stable ' + VERSION + ' binaries. All eight native targets and all required genuine baseline upgrades per target passed. '
+    coverage = ('All eight native targets passed. macOS 3.5.2 is a fresh PKG installation baseline; '
+                'cold PKG and installed-runtime checks passed on Intel and ARM, including macOS 15 and 26 ARM. '
+                'The update from macOS 3.5.2 to the next release will be tested separately. '
+                'Windows and Linux genuine baseline upgrade checks passed. '
+                if VERSION == '3.5.2' else
+                'All eight native targets and all required genuine baseline upgrades per target passed. ')
+    body = ('Stable ' + VERSION + ' binaries. ' + coverage +
             'Candidate source: ' + plan['candidate_sha'] + '. Harness: ' + plan['harness_sha'] + '. '
             'Dispatch actor: ' + plan['dispatch_actor'] + '. Triggering actor: ' + plan['triggering_actor'] + '. '
             'Candidate: ' + plan['candidate_tag'] + ', Release ID ' + str(plan['candidate_release_id']) + '. '
