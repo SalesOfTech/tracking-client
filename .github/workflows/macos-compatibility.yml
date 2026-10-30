@@ -1,6 +1,11 @@
 name: Verify macOS ARM compatibility and installer branding
 on:
   workflow_dispatch:
+    inputs:
+      profile:
+        type: choice
+        default: all
+        options: [all, legacy, modern]
 permissions:
   contents: read
 jobs:
@@ -8,15 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: macos-14
-            profile: legacy
-            ui: qt
-            floor: 11
-          - runner: macos-15
-            profile: modern
-            ui: electron
-            floor: 13
+        include: ${{ fromJSON(inputs.profile == 'legacy' && '[{"runner":"macos-14","profile":"legacy","ui":"qt","floor":11}]' || inputs.profile == 'modern' && '[{"runner":"macos-15","profile":"modern","ui":"electron","floor":13}]' || '[{"runner":"macos-14","profile":"legacy","ui":"qt","floor":11},{"runner":"macos-15","profile":"modern","ui":"electron","floor":13}]') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     env:

@@ -8,6 +8,9 @@ from macholib.mach_o import LC_BUILD_VERSION, LC_VERSION_MIN_MACOSX
 from PyInstaller.archive.readers import CArchiveReader
 
 ARM64 = 0x0100000c
+MACHO_MAGIC = {b'\xcf\xfa\xed\xfe', b'\xfe\xed\xfa\xcf', b'\xce\xfa\xed\xfe',
+               b'\xfe\xed\xfa\xce', b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca',
+               b'\xca\xfe\xba\xbf', b'\xbf\xba\xfe\xca'}
 
 
 def minimum(path):
@@ -36,7 +39,14 @@ def verify(executable, major=11):
         for name, entry in archive.toc.items():
             if entry[-1] != 'b':
                 continue
-            binary.write_bytes(archive.extract(name))
+            data = archive.extract(name)
+            # Qt hooks also classify resource text as BINARY. Audit native code,
+            # while refusing corrupted files named as loadable libraries.
+            if data[:4] not in MACHO_MAGIC:
+                if name.endswith(('.so', '.dylib')):
+                    raise ValueError('Invalid embedded native library: ' + name)
+                continue
+            binary.write_bytes(data)
             if minimum(binary) > ceiling:
                 raise ValueError('Embedded binary requires newer macOS: ' + name)
             checked += 1
