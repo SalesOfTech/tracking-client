@@ -2,15 +2,63 @@ import argparse
 import os
 from pathlib import Path
 import sys
+import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from tools.macos_pilot import engine_spec
+from tools.macos_pilot import engine_spec, verify_engine
 from tools.release import build_plan
 
 
 class MacOSPilotTests(unittest.TestCase):
+    def test_signed_python_dylib_and_engine_are_both_verified(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            app = Path(temporary)/'engine.app'
+            libraries = app/'Contents/Frameworks'
+            libraries.mkdir(parents=True)
+            runtime = libraries/'libpython3.10.dylib'
+            runtime.write_bytes(b'native runtime fixture')
+            with patch('tools.macos_pilot.command') as command:
+                verify_engine(app)
+            self.assertEqual(command.call_count, 2)
+            command.assert_any_call('/usr/bin/codesign', '--verify', '--strict', runtime)
+            command.assert_any_call('/usr/bin/codesign', '--verify', '--deep', '--strict', app)
+            with patch('tools.macos_pilot.command', side_effect=subprocess.CalledProcessError(1, 'codesign')):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    verify_engine(app)
+
+    def test_framework_still_requires_seal_even_when_dylib_exists(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            app = Path(temporary)/'engine.app'
+            framework = app/'Contents/Frameworks/Python.framework'
+            framework.mkdir(parents=True)
+            (framework.parent/'libpython3.10.dylib').write_bytes(b'runtime fixture')
+            with patch('tools.macos_pilot.command') as command:
+                with self.assertRaisesRegex(ValueError, 'resource seal missing'):
+                    verify_engine(app)
+                command.assert_not_called()
+                seal = framework/'Versions/3.10/_CodeSignature/CodeResources'
+                seal.parent.mkdir(parents=True)
+                seal.write_bytes(b'seal fixture')
+                verify_engine(app)
+                command.assert_any_call('/usr/bin/codesign', '--verify', '--deep', '--strict', framework)
+
+    def test_missing_or_ambiguous_python_runtime_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            app = Path(temporary)/'engine.app'
+            libraries = app/'Contents/Frameworks'
+            libraries.mkdir(parents=True)
+            with patch('tools.macos_pilot.command') as command:
+                with self.assertRaisesRegex(ValueError, 'Expected one'):
+                    verify_engine(app)
+                for version in ('3.10', '3.11'):
+                    (libraries/('libpython' + version + '.dylib')).write_bytes(b'runtime fixture')
+                with self.assertRaisesRegex(ValueError, 'Expected one'):
+                    verify_engine(app)
+                command.assert_not_called()
+
     def test_stable_arm_uses_proven_engine_without_changing_other_targets(self):
         with patch.dict(os.environ, SOFT_TRACKING_MACOS_PILOT='', SOFT_TRACKING_UI='electron'), \
                 patch('tools.release.require_github_runner'):

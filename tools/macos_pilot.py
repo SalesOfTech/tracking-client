@@ -2,6 +2,7 @@
 import hashlib
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -18,6 +19,25 @@ def native_architecture(architecture):
     if architecture not in ('arm64', 'x64'):
         raise ValueError('Unsupported macOS architecture')
     return 'x86_64' if architecture == 'x64' else architecture
+
+
+def verify_engine(app):
+    frameworks = app/'Contents/Frameworks'
+    python = frameworks/'Python.framework'
+    if python.exists() or python.is_symlink():
+        if not list(python.rglob('CodeResources')):
+            raise ValueError('Python framework resource seal missing')
+        command('/usr/bin/codesign', '--verify', '--deep', '--strict', python)
+    else:
+        # The Intel toolchain supplies a signed dylib, not a framework bundle.
+        libraries = [path for path in frameworks.glob('libpython*.dylib')
+                     if re.fullmatch(r'libpython[0-9]+\.[0-9]+\.dylib', path.name)]
+        if len(libraries) != 1 or not libraries[0].is_file():
+            raise ValueError('Expected one embedded Python runtime')
+        if not libraries[0].resolve().is_relative_to(frameworks.resolve()):
+            raise ValueError('Python runtime escapes engine bundle')
+        command('/usr/bin/codesign', '--verify', '--strict', libraries[0])
+    command('/usr/bin/codesign', '--verify', '--deep', '--strict', app)
 
 
 def engine_spec(architecture='arm64'):
@@ -58,10 +78,7 @@ def build_engine(out, work, payload, architecture='arm64'):
         if not framework.is_symlink():
             command('/usr/bin/codesign', '--force', '--sign', '-', framework)
     command('/usr/bin/codesign', '--force', '--sign', '-', app)
-    command('/usr/bin/codesign', '--verify', '--deep', '--strict', app)
-    python = app/'Contents/Frameworks/Python.framework'
-    if not list(python.rglob('CodeResources')):
-        raise ValueError('Python framework resource seal missing')
+    verify_engine(app)
     archive = out/'engine.zip'
     command('/usr/bin/ditto', '-c', '-k', '--keepParent', '--norsrc', app, archive)
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()

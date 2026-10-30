@@ -23,7 +23,7 @@ TARGETS=[
     {'target':'windows-x64-legacy','runner':'windows-2022','python':'3.10.11','arch':'x64','profile':'legacy'},
     {'target':'windows-arm64-modern','runner':'windows-11-arm','python':'3.13.15','arch':'arm64','profile':'modern'},
     {'target':'macos-x64-modern','runner':'macos-15-intel','python':'3.10.19','arch':'x64','profile':'modern'},
-    {'target':'macos-arm64-modern','runner':'macos-14','python':'3.10.11','arch':'arm64','profile':'modern'},
+    {'target':'macos-arm64-modern','runner':'macos-15','python':'3.10.11','arch':'arm64','profile':'modern'},
     {'target':'linux-x64-modern','runner':'ubuntu-22.04','python':'3.10.19','arch':'x64','profile':'modern'},
     {'target':'linux-arm64-modern','runner':'ubuntu-22.04-arm','python':'3.10.19','arch':'arm64','profile':'modern'},
 ]

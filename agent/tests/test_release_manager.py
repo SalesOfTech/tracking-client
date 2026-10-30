@@ -374,12 +374,16 @@ class ReleaseTests(unittest.TestCase):
                 if destination.name != archive_name:
                     self.assertEqual((destination.parent / archive_name).read_bytes(), engine)
             return replace(source, destination)
-        with patch.object(installer.sys, 'platform', 'darwin'), patch.object(installer.os, 'replace', side_effect=record):
+        with patch.object(installer, 'runtime_target', return_value=(self.old['os'], self.old['architecture'])), \
+                patch.object(installer.sys, 'platform', 'darwin'), patch.object(installer.os, 'replace', side_effect=record):
             bundle, root = self.installer_fixture(engine=engine)
             wrappers = [executable_name(native, True) for native in (False, True)]
             self.assertEqual(replacements, [archive_name, *wrappers])
             for name in wrappers:
-                self.assertEqual(stat.S_IMODE((root / name).stat().st_mode), 0o700)
+                if os.name != 'nt':
+                    self.assertEqual(stat.S_IMODE((root / name).stat().st_mode), 0o700)
+                else:
+                    self.assertEqual((root / name).read_bytes(), (root / 'versions/3.0.1/launcher' / name).read_bytes())
             before = (root / 'current.json').read_bytes(), (root / 'enrollment.json').read_bytes()
             originals = {name: (root / name).read_bytes() for name in wrappers}
             (root / archive_name).unlink()
@@ -396,7 +400,8 @@ class ReleaseTests(unittest.TestCase):
 
     def test_macos_bootstrap_copy_failure_leaves_existing_files_and_no_temporary_files(self):
         from agent_tracker import installer
-        with patch.object(installer.sys, 'platform', 'darwin'):
+        with patch.object(installer, 'runtime_target', return_value=(self.old['os'], self.old['architecture'])), \
+                patch.object(installer.sys, 'platform', 'darwin'):
             _, root = self.installer_fixture(engine=b'engine fixture')
             release = root / 'versions/3.0.1'
             before = {path.name: path.read_bytes() for path in root.iterdir() if path.is_file()}
@@ -412,7 +417,8 @@ class ReleaseTests(unittest.TestCase):
 
     def test_macos_manual_engine_upgrade_preserves_original_bootstrap_and_sidecar(self):
         from agent_tracker import installer
-        with patch.object(installer.sys, 'platform', 'darwin'):
+        with patch.object(installer, 'runtime_target', return_value=(self.old['os'], self.old['architecture'])), \
+                patch.object(installer.sys, 'platform', 'darwin'):
             bundle, root = self.installer_fixture(engine=b'first engine fixture')
             wrappers = [executable_name(native, True) for native in (False, True)]
             before = {name: (root / name).read_bytes() for name in wrappers}
