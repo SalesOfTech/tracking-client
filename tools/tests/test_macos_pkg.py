@@ -42,7 +42,7 @@ class PackageTests(unittest.TestCase):
             self.assertEqual({path.name for path in root.iterdir()}, {'en.lproj', 'cs.lproj', 'ru.lproj'})
             for language in ('en', 'cs', 'ru'):
                 for page in ('welcome.html', 'conclusion.html'):
-                    text = (root / (language + '.lproj') / page).read_text()
+                    text = (root / (language + '.lproj') / page).read_text(encoding='utf-8')
                     self.assertIn('SOFT Tracking', text)
                     self.assertNotIn('http', text)
-            self.assertIn('NOT installed', (root / 'en.lproj/conclusion.html').read_text())
+            self.assertIn('NOT installed', (root / 'en.lproj/conclusion.html').read_text(encoding='utf-8'))

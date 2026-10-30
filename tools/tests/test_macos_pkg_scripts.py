@@ -116,6 +116,7 @@ sys.exit(config.get('native_status', 0))
 '''
 
 
+@unittest.skipIf(os.name == 'nt', 'macOS PKG scripts require POSIX process and filesystem semantics')
 class PackageScriptsTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='soft-pkg-scripts-')
