@@ -190,10 +190,78 @@ private func launch(_ app: URL, role: String, wrapper: URL, arguments: [String])
 }
 
 @MainActor
+private func confirmSetup() -> Bool {
+    let application = NSApplication.shared
+    application.setActivationPolicy(.accessory)
+    let alert = NSAlert()
+    let language = Locale.preferredLanguages.first ?? "en"
+    if language.hasPrefix("ru") {
+        alert.messageText = "Запустить установку SOFT Tracking?"
+        alert.informativeText = "Этот пакет не заверен Apple. Продолжайте только если получили его от SOFT и доверяете ему. Будет проверена целостность пакета и разрешён запуск только его рабочей копии и компонентов SOFT. Защита macOS останется включённой. Затем введите ключ сотрудника и нажмите «Установить»."
+        alert.addButton(withTitle: "Продолжить")
+        alert.addButton(withTitle: "Отмена")
+    } else if language.hasPrefix("cs") {
+        alert.messageText = "Spustit instalaci SOFT Tracking?"
+        alert.informativeText = "Tento balíček není notarizován společností Apple. Pokračujte pouze tehdy, pokud pochází od SOFT a důvěřujete mu. Ověříme integritu a povolíme spuštění pouze pracovní kopie a komponent SOFT. Ochrana macOS zůstane zapnutá. Poté zadejte klíč zaměstnance a klikněte na Instalovat."
+        alert.addButton(withTitle: "Pokračovat")
+        alert.addButton(withTitle: "Zrušit")
+    } else {
+        alert.messageText = "Start SOFT Tracking setup?"
+        alert.informativeText = "This package is not notarized by Apple. Continue only if it came from SOFT and you trust it. We will verify integrity and allow only its working copy and SOFT components to run. macOS protection stays enabled. Then enter your employee key and click Install."
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Cancel")
+    }
+    application.activate(ignoringOtherApps: true)
+    return alert.runModal() == .alertFirstButtonReturn
+}
+
+private func preparedSetupDirectory(_ wrapper: URL) throws {
+    let app = wrapper.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let root = app.deletingLastPathComponent()
+    let temporary = URL(fileURLWithPath: NSTemporaryDirectory()).resolvingSymlinksInPath()
+    guard root.deletingLastPathComponent() == temporary,
+          root.lastPathComponent.hasPrefix("SOFTTrackingGUI."),
+          app.lastPathComponent == "SOFT-Tracking-Setup.app" else { throw Failure.wrapper }
+    try directory(root, owned: true, privateMode: true)
+    for path in [app, app.appendingPathComponent("Contents"), wrapper.deletingLastPathComponent()] {
+        try directory(path, owned: true)
+    }
+    try runTool("/usr/bin/codesign", ["--verify", "--deep", "--strict", app.path], failure: .signature)
+}
+
+private func runPreparedSetup(wrapper: URL, arguments: [String]) throws -> Int32 {
+    let source = wrapper.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let temporary = URL(fileURLWithPath: NSTemporaryDirectory()).resolvingSymlinksInPath()
+    try directory(temporary, owned: true)
+    var template = Array(temporary.appendingPathComponent("SOFTTrackingGUI.XXXXXX").path.utf8CString)
+    guard mkdtemp(&template) != nil else { throw Failure.cache }
+    let root = URL(fileURLWithPath: String(cString: template), isDirectory: true)
+    defer {
+        do { try fm.removeItem(at: root) }
+        catch { FileHandle.standardError.write(Data((Failure.cleanup.rawValue + "\n").utf8)) }
+    }
+    try directory(root, owned: true, privateMode: true)
+    let copy = root.appendingPathComponent("SOFT-Tracking-Setup.app")
+    try runTool("/usr/bin/ditto", [source.path, copy.path], failure: .extraction)
+    let executable = copy.appendingPathComponent("Contents/MacOS/SOFT-Tracking-Setup")
+    try preparedSetupDirectory(executable)
+    // Consent applies to this verified private copy, never to the original download.
+    try runTool("/usr/bin/xattr", ["-dr", "-s", "com.apple.quarantine", copy.path], failure: .cache)
+    let child = Process()
+    child.executableURL = executable
+    child.arguments = ["--prepared-setup-launch"] + arguments
+    try child.run()
+    child.waitUntilExit()
+    guard child.terminationReason == .exit else { throw Failure.execution }
+    return child.terminationStatus
+}
+
+@MainActor
 private func report(_ failure: Failure, setup: Bool, arguments: [String]) -> Never {
     FileHandle.standardError.write(Data((failure.rawValue + "\n").utf8))
     let headless = arguments.contains("--health-check") || arguments.contains("--migration-self-test")
         || arguments.contains("--prepare-engine") || arguments.contains("--trust-setup-engine")
+        || arguments.contains("--setup-launch-self-test")
     if setup && !headless {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
@@ -208,7 +276,7 @@ private func report(_ failure: Failure, setup: Bool, arguments: [String]) -> Nev
     exit(1)
 }
 
-let originalArguments = Array(CommandLine.arguments.dropFirst())
+var originalArguments = Array(CommandLine.arguments.dropFirst())
 var isSetup = false
 do {
     let wrapper = try wrapperURL()
@@ -220,14 +288,28 @@ do {
           engineName == "engine-\(engineSHA256).zip" else { throw Failure.configuration }
     let prepareOnly = originalArguments.first == "--prepare-engine"
     let trustEngine = originalArguments.first == "--trust-setup-engine"
+    let preparedSetup = originalArguments.first == "--prepared-setup-launch"
+    let setupSelfTest = originalArguments.first == "--setup-launch-self-test"
     if (prepareOnly || trustEngine) && originalArguments.count != 1 { throw Failure.arguments }
-    if trustEngine && !isSetup { throw Failure.arguments }
+    if (trustEngine || preparedSetup || setupSelfTest) && !isSetup { throw Failure.arguments }
+    if setupSelfTest && originalArguments.count != 1 { throw Failure.arguments }
+    if preparedSetup {
+        try preparedSetupDirectory(wrapper)
+        originalArguments.removeFirst()
+    }
 
     let archive: URL
     let parent: URL
     let cache: URL
     if isSetup {
         guard getuid() != 0 && geteuid() != 0 else { throw Failure.root }
+        if !preparedSetup && (originalArguments.isEmpty || setupSelfTest) {
+            // The self-test exercises the same preparation but can only run health checks.
+            let consent = setupSelfTest || MainActor.assumeIsolated { confirmSetup() }
+            guard consent else { exit(0) }
+            let status = try runPreparedSetup(wrapper: wrapper, arguments: setupSelfTest ? ["--health-check"] : [])
+            exit(status)
+        }
         guard let resources = Bundle.main.resourceURL else { throw Failure.payload }
         let payload = resources.appendingPathComponent("setup-payload", isDirectory: true)
         try directory(payload)
@@ -251,8 +333,8 @@ do {
         cache = parent.appendingPathComponent(".engine-\(engineSHA256)", isDirectory: true)
     }
     let app = try prepareEngine(archive: archive, parent: parent, cache: cache)
-    if trustEngine {
-        // Explicit administrator fallback only, after archive and bundle verification.
+    if trustEngine || preparedSetup {
+        // Explicit local trust, after archive and bundle verification.
         try runTool("/usr/bin/xattr", ["-dr", "-s", "com.apple.quarantine", app.path], failure: .cache)
     }
     if prepareOnly || trustEngine {

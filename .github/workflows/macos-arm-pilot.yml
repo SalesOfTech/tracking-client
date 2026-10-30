@@ -12,7 +12,7 @@ concurrency:
   group: macos-arm-pilot
   cancel-in-progress: false
 env:
-  RELEASE_VERSION: 3.5.2-rc.1
+  RELEASE_VERSION: 3.5.2-rc.2
   RELEASE_TARGET: macos-arm64-modern
   RELEASE_PROFILE: modern
   SOFT_TRACKING_UI: electron
@@ -99,7 +99,7 @@ jobs:
           python - <<'PY'
           import json, os, re, subprocess
           tag = os.environ['PILOT_TAG']
-          match = re.fullmatch(r'macos-arm-pilot-3\.5\.2-rc\.1-(\d+)-(\d+)', tag)
+          match = re.fullmatch(r'macos-arm-pilot-3\.5\.2-rc\.2-(\d+)-(\d+)', tag)
           assert match, 'Not an ARM pilot tag'
           def api(path):
               return json.loads(subprocess.check_output(['gh', 'api', 'repos/' + os.environ['GITHUB_REPOSITORY'] + path]))
@@ -130,4 +130,4 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PILOT_TAG: ${{ inputs.existing_pilot || needs.build.outputs.tag }}
         run: |
-          gh release edit "$PILOT_TAG" --draft=false --prerelease --latest=false --notes "ARM-only installation pilot 3.5.2-rc.1. Exact DMG passed native installed runtime, native messaging, mounted setup and explicit administrator trust fallback checks on GitHub macOS 14/15/26 ARM runners. Physical M1 and next-release live update testing remain pending. Requires macOS 13+. Unsigned developer identity: not Apple-notarized, explicit trust may be required. Windows/Linux/Intel, stable release, widget and production update feed are unchanged."
+          gh release edit "$PILOT_TAG" --draft=false --prerelease --latest=false --notes "ARM-only installation pilot 3.5.2-rc.2. Graphical setup preparation replaces the normal Terminal workflow; enter the employee key and complete installation. Exact DMG passed native installed runtime, native messaging, mounted setup, GUI preparation cold/warm cache and explicit administrator trust fallback checks on GitHub macOS 14/15/26 ARM runners. Physical M1 full installation, Finder/Gatekeeper consent interaction and next-release live update testing remain pending. Requires macOS 13+. Not Apple-notarized: Open Anyway may be required. Windows/Linux/Intel, stable release, widget and production update feed are unchanged."
