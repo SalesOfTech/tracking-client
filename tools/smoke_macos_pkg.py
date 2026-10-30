@@ -55,7 +55,7 @@ def processes_with_argument(argument):
     return matches
 
 
-def check(package, evidence):
+def check(package, evidence, require_cold=False):
     if platform.system() != 'Darwin' or platform.machine() != 'arm64' or os.geteuid() == 0:
         raise RuntimeError('Requires an isolated native ARM runner user')
     if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted':
@@ -70,6 +70,8 @@ def check(package, evidence):
     before = set(temp.glob('SOFTTrackingGUI.*'))
     cache = Path.home() / 'Library/Caches/SOFTTrackingSetup-engine'
     cache_before = set(cache.iterdir()) if cache.exists() else set()
+    if require_cold and cache_before:
+        raise RuntimeError('Cold installation test requires an empty setup engine cache')
     marker = None
     owned = set()
     try:
@@ -80,7 +82,6 @@ def check(package, evidence):
         print(policy.stderr[-2000:], flush=True)
         # Opening a document in Apple's signed Installer is distinct from executing
         # our unsigned app. Capture any system consent prompt instead of hiding it.
-        policy_ui_before = {p.pid for p in psutil.process_iter() if p.name() == 'CoreServicesUIAgent'}
         opened = subprocess.Popen(['open', '-a', '/System/Library/CoreServices/Installer.app', str(package)],
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
@@ -97,8 +98,16 @@ def check(package, evidence):
             opened.wait(timeout=10)
             # Cancel only the consent UI created by this isolated probe. This does
             # not approve the package or modify Gatekeeper policy.
-            stop([p for p in psutil.process_iter() if p.name() == 'CoreServicesUIAgent'
-                  and p.pid not in policy_ui_before])
+            # The system may reuse an existing UI-agent process for this prompt.
+            # Only this isolated hosted runner's user owns the consent probe.
+            policy_ui = []
+            for process in psutil.process_iter():
+                try:
+                    if process.name() == 'CoreServicesUIAgent' and process.uids().effective == os.getuid():
+                        policy_ui.append(process)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            stop(policy_ui)
         stop(installer_processes())
         # CLI authorization tests package execution AFTER the user's trust decision;
         # it is deliberately not reported as automated Gatekeeper consent.
@@ -186,5 +195,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('package', type=Path)
     parser.add_argument('evidence', type=Path)
+    parser.add_argument('--require-cold', action='store_true')
     args = parser.parse_args()
-    check(args.package.resolve(), args.evidence.resolve())
+    check(args.package.resolve(), args.evidence.resolve(), args.require_cold)

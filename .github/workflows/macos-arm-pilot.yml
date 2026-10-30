@@ -99,7 +99,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-15, macos-26]
+        runner: [macos-14, macos-15, macos-26]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -137,10 +137,10 @@ jobs:
           gh release download "$PILOT_TAG" --dir "$RUNNER_TEMP/pilot" --pattern 'SOFT-Tracking-Setup-ARM.pkg*'
           (cd "$RUNNER_TEMP/pilot" && shasum -a 256 -c SOFT-Tracking-Setup.dmg.sha256)
           (cd "$RUNNER_TEMP/pilot" && shasum -a 256 -c SOFT-Tracking-Setup-ARM.pkg.sha256)
+      - name: Normal package GUI acceptance
+        run: python tools/smoke_macos_pkg.py "$RUNNER_TEMP/pilot/SOFT-Tracking-Setup-ARM.pkg" "$RUNNER_TEMP/evidence" --require-cold
       - name: Native installed runtime and administrator fallback acceptance
         run: python tools/smoke_macos_pilot.py "$RUNNER_TEMP/pilot/SOFT-Tracking-Setup.dmg"
-      - name: Normal package GUI acceptance
-        run: python tools/smoke_macos_pkg.py "$RUNNER_TEMP/pilot/SOFT-Tracking-Setup-ARM.pkg" "$RUNNER_TEMP/evidence"
       - name: Retain package evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
