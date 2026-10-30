@@ -148,6 +148,7 @@ def check(package, evidence):
         assert len(runners) == 1, 'Expected one package launch supervisor'
         assert all(os.getpgid(p.pid) != os.getpgid(runners[0].pid) for p in normal_ui), \
             'Setup must not share the temporary launchd job process group'
+        time.sleep(2)
         run('screencapture', '-x', evidence / '02-key-entry.png')
         run('osascript', '-e', 'tell application id "com.soft.tracking.ui" to quit', timeout=30)
         deadline = time.monotonic() + 30
