@@ -222,6 +222,35 @@ class HarnessTests(unittest.TestCase):
         self.assertIsNone(smoke.runtime_ready([supervisor, runtime], root, '3.5.1'))
         self.assertIsNone(smoke.runtime_ready([supervisor, runtime], root, self.baseline_version))
 
+    def test_sealed_engine_readiness_requires_exact_payload_and_role(self):
+        root = self.root / 'install'
+        payload = root / 'versions/3.5.2'
+        wrapper = payload / 'app' / smoke.executable()
+        wrapper.parent.mkdir(parents=True)
+        archive = wrapper.parent / ('engine-' + 'a' * 64 + '.zip')
+        archive.write_bytes(b'verified archive fixture')
+        engine = wrapper.parent / ('.' + archive.stem) / 'SOFT Tracking Engine.app/Contents/MacOS/soft-tracking-engine'
+        atomic_json(payload / 'build.json', {'os': 'macos', 'macos_engine': 'sealed-onedir-v1'})
+        marker = root / 'run' / ('b' * 32 + '.ready')
+        atomic_json(marker, {'ready': True})
+        prefix = [str(engine), '--tracking-role', 'app', '--tracking-wrapper', str(wrapper), '--']
+        runtime, supervisor = Mock(), Mock()
+        for process in (runtime, supervisor):
+            process.exe.return_value = str(engine)
+        supervisor.cmdline.return_value = prefix + ['--supervisor']
+        runtime.cmdline.return_value = prefix + ['--autostart']
+        runtime.environ.return_value = {'SOFT_TRACKING_HEALTH': str(marker), 'SOFT_TRACKING_RUN_TOKEN': marker.stem}
+        self.assertEqual(smoke.runtime_ready([supervisor, runtime], root, '3.5.2'), marker)
+        for bad in ([str(engine), '--autostart'],
+                    [str(engine), '--tracking-role', 'native', '--tracking-wrapper', str(wrapper), '--'],
+                    [str(engine), '--tracking-role', 'app', '--tracking-wrapper', '/other/wrapper', '--'],
+                    prefix + ['--health-check']):
+            runtime.cmdline.return_value = bad
+            self.assertIsNone(smoke.runtime_ready([supervisor, runtime], root, '3.5.2'))
+        runtime.cmdline.return_value = prefix + ['--autostart']
+        runtime.exe.return_value = str(self.root / 'other-engine')
+        self.assertIsNone(smoke.runtime_ready([supervisor, runtime], root, '3.5.2'))
+
     def fixture(self):
         cert, tls = smoke.make_certificate(self.root)
         device = {'device_id': 'a' * 32, 'device_secret': 'b' * 64}

@@ -28,6 +28,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import socket
@@ -373,12 +374,27 @@ class ProcessTree:
 
 def runtime_ready(children, root, version):
     expected = (root / 'versions' / version / 'app' / executable()).resolve()
+    build = read_json(root / 'versions' / version / 'build.json', {})
+    engine = None
+    if build.get('os') == 'macos' and build.get('macos_engine') == 'sealed-onedir-v1':
+        archives = [path for path in expected.parent.glob('engine-*.zip')
+                    if re.fullmatch(r'engine-[a-f0-9]{64}\.zip', path.name)]
+        if len(archives) == 1:
+            engine = (expected.parent / ('.' + archives[0].stem) /
+                      'SOFT Tracking Engine.app/Contents/MacOS/soft-tracking-engine').resolve()
     supervisor, runtime = False, None
     for process in children:
         try:
-            if Path(process.exe()).resolve() != expected:
-                continue
+            actual = Path(process.exe()).resolve()
             args = process.cmdline()
+            if actual != expected:
+                # The native wrapper execs the sealed engine. Require its exact
+                # payload path and app role, never an arbitrary Python process.
+                if (engine is None or actual != engine or len(args) < 6
+                        or args[1:4] != ['--tracking-role', 'app', '--tracking-wrapper']
+                        or Path(args[4]).resolve() != expected or args[5] != '--'):
+                    continue
+                args = args[6:]
             if '--supervisor' in args:
                 supervisor = True
             elif '--health-check' not in args:

@@ -525,6 +525,10 @@ def smoke_failure_stage(path):
         for line in reversed(lines):
             if line in stages:
                 return stages[line]
+            match = re.fullmatch(r'FAIL: published-update stage=([a-z-]+) exception=[A-Za-z]+', line)
+            if match and match[1] in {'install-old', 'old-launch', 'stage-new', 'new-health',
+                                     'rollback-data', 'manual-upgrade', 'final-launch', 'bootstrap-retention'}:
+                return match[1]
     except OSError:
         pass
     return 'subprocess-failure'

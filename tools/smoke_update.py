@@ -10,6 +10,7 @@ import time
 
 ROOT=Path(__file__).resolve().parents[1]
 CLIENT_ROOT=Path(os.environ.get('TRACKING_SMOKE_CLIENT_ROOT', ROOT)).resolve()
+STAGE = 'arguments'
 sys.path.insert(0,str(CLIENT_ROOT/'agent'))
 import agent_tracker
 if Path(agent_tracker.__file__).resolve() != CLIENT_ROOT/'agent/agent_tracker/__init__.py':
@@ -60,7 +61,9 @@ def run_installed(root, env, upgrade=None):
 
 
 def main(old,new, published=False):
+    global STAGE
     with tempfile.TemporaryDirectory(prefix='soft-tracking-update-') as temporary:
+        STAGE = 'install-old'
         root=Path(temporary)/'install'
         install(Path(old)/'setup-payload',root,'a'*32,integrate=False)
         bootstraps = {executable_name(native, True): file_digest(root/executable_name(native, True)) for native in (False, True)}
@@ -78,6 +81,7 @@ def main(old,new, published=False):
         env=dict(os.environ, SOFT_TRACKING_INSTALL=str(root), LOCALAPPDATA=temporary, XDG_DATA_HOME=temporary)
         manual_restart=False
         if published:
+            STAGE = 'old-launch'
             try:
                 run_installed(root, env)
             except subprocess.TimeoutExpired:
@@ -89,6 +93,7 @@ def main(old,new, published=False):
                 manual_restart=True
                 assert manager.active()['version']==before
                 print('COMPATIBILITY: Windows ARM beta.7 requires closing/restarting the old client before installation',flush=True)
+        STAGE = 'stage-new'
         metadata=read_json(Path(new)/'setup-payload/setup-build.json')
         manifest=verify_manifest(read_json(Path(new)/'manifest.json'),manager.keys,before,metadata['os'],metadata['architecture'])
         staged=manager.stage(Path(new)/('release-'+metadata['version']+'.zip'),manifest)
@@ -101,6 +106,7 @@ def main(old,new, published=False):
         if metadata.get('ui') == 'electron':
             env['SOFT_TRACKING_RUN_TOKEN'] = 'previous-runtime-smoke'
             atomic_json(root/'stop-request.json', {'token': env['SOFT_TRACKING_RUN_TOKEN']})
+        STAGE = 'new-health'
         result=run_frozen([str(executable),'--health-check'],env=env,timeout=60)
         assert result.returncode==0 and health.exists(),'New frozen version failed its health check'
         (root/'stop-request.json').unlink(missing_ok=True)
@@ -108,6 +114,7 @@ def main(old,new, published=False):
         assert manager.active()['version']==metadata['version']
         assert read_json(root/'extension/manifest.json')['version']==metadata['extension_version']
         # Simulate a supervisor crash before confirmation, then restart recovery.
+        STAGE = 'rollback-data'
         ReleaseManager(root).rollback()
         assert manager.active()['version']==before
         assert read_json(root/'enrollment.json')['company_code']=='a'*32
@@ -118,11 +125,13 @@ def main(old,new, published=False):
         queue.close()
         state=ClientState(root.parent);assert state.get('device')==device;state.close()
         if published:
+            STAGE = 'manual-upgrade'
             # The new installer must replace a running, unregistered old client offline.
             if manual_restart:
                 install(Path(new)/'setup-payload', root, 'a'*32, integrate=False)
             else:
                 run_installed(root, env, lambda: install(Path(new)/'setup-payload', root, 'a'*32, integrate=False))
+            STAGE = 'final-launch'
             run_installed(root, env)
             assert manager.active()['version']==metadata['version']
             queue=EventQueue(root.parent/'outbox.sqlite3')
@@ -131,9 +140,15 @@ def main(old,new, published=False):
             queue.close()
             state=ClientState(root.parent);assert state.get('device')==device;state.close()
             print('PASS: published '+before+' -> '+metadata['version']+', '+('installer after manual restart' if manual_restart else 'installer upgrades running unregistered client')+', original bootstrap, rollback and pending data retained')
+        STAGE = 'bootstrap-retention'
         assert all(file_digest(root/name)==digest for name,digest in bootstraps.items()), 'Upgrade replaced the original bootstrap'
         print('PASS: real signed update, new frozen GUI/native health check, extension switch, interrupted-update rollback, enrollment/data retained')
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('old');parser.add_argument('new');parser.add_argument('--published',action='store_true');args=parser.parse_args();main(args.old,args.new,args.published)
+    parser=argparse.ArgumentParser();parser.add_argument('old');parser.add_argument('new');parser.add_argument('--published',action='store_true');args=parser.parse_args()
+    try:
+        main(args.old,args.new,args.published)
+    except Exception as error:
+        print('FAIL: published-update stage=' + STAGE + ' exception=' + type(error).__name__, flush=True)
+        raise
