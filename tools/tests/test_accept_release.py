@@ -101,7 +101,7 @@ class GateTests(unittest.TestCase):
     def test_candidate_requires_exact_successful_workflow_attempt_and_tag_sha(self):
         api, data = self.candidate_api()
         self.assertEqual(gate.candidate_snapshot(api, self.tag)['assets'], self.plan['assets'])
-        for field, value in (('run_attempt', 3), ('conclusion', 'failure'), ('event', 'pull_request'),
+        for field, value in (('run_attempt', 1), ('conclusion', 'failure'), ('event', 'pull_request'),
                              ('head_branch', 'feature'), ('workflow_id', 88), ('path', 'other.yml')):
             original = data['actions/runs/123'][field]
             data['actions/runs/123'][field] = value
@@ -111,6 +111,41 @@ class GateTests(unittest.TestCase):
         data['git/ref/tags/' + self.tag]['object']['sha'] = 'c' * 40
         with self.assertRaises(ValueError):
             gate.candidate_snapshot(api, self.tag)
+
+    def test_candidate_same_sha_failed_job_retry_retains_successful_targets(self):
+        api, data = self.candidate_api()
+        initial = copy.deepcopy(data['actions/runs/123'])
+        initial['conclusion'] = 'cancelled'
+        data['actions/runs/123']['run_attempt'] = 3
+        data['actions/runs/123/attempts/2'] = initial
+        data['actions/runs/123/attempts/3'] = copy.deepcopy(data['actions/runs/123'])
+        old = [dict(job, run_id=123, head_sha='a' * 40, status='completed')
+               for job in api.jobs.return_value]
+        old[0]['conclusion'] = 'cancelled'
+        old[-1]['conclusion'] = 'skipped'
+        retried = [dict(old[0], conclusion='success'), dict(old[-1], conclusion='success')]
+        api.jobs.side_effect = lambda run, attempt: copy.deepcopy(old if attempt == 2 else retried)
+        result = gate.candidate_snapshot(api, self.tag)
+        self.assertEqual(result['candidate_run_attempt'], 3)
+        self.assertEqual(result['candidate_tag'], self.tag)
+        for change in ('wrong_sha', 'wrong_run', 'failed', 'missing', 'duplicate', 'changed_attempt_sha'):
+            saved = copy.deepcopy(retried)
+            if change == 'wrong_sha':
+                retried[0]['head_sha'] = 'c' * 40
+            elif change == 'wrong_run':
+                retried[0]['run_id'] = 987
+            elif change == 'failed':
+                retried[0]['conclusion'] = 'failure'
+            elif change == 'missing':
+                retried.pop(0)
+            elif change == 'duplicate':
+                retried.append(retried[0])
+            else:
+                data['actions/runs/123/attempts/2']['head_sha'] = 'c' * 40
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                gate.candidate_snapshot(api, self.tag)
+            retried[:] = saved
+            data['actions/runs/123/attempts/2']['head_sha'] = 'a' * 40
 
     def test_candidate_missing_native_target_cannot_pass(self):
         api, _ = self.candidate_api()

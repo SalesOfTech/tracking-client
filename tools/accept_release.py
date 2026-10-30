@@ -278,12 +278,32 @@ def candidate_assets(release, partial=False):
 
 
 def candidate_snapshot(api, tag):
-    run_id, attempt = candidate_identity(tag)
+    run_id, tag_attempt = candidate_identity(tag)
     run = api.api(f'actions/runs/{run_id}')
+    attempt = run.get('run_attempt')
+    require(type(attempt) is int and tag_attempt <= attempt <= tag_attempt + 20)
     validate_run(run, api.repo, run_id, attempt)
     workflow = api.api('actions/workflows/release.yml')
     require(run['workflow_id'] == workflow['id'])
     jobs = api.jobs(run_id, attempt)
+    if attempt != tag_attempt:
+        # Retry only failed jobs at the immutable run SHA; retain successful native jobs.
+        latest = {}
+        for number in range(tag_attempt, attempt + 1):
+            previous = api.api(f'actions/runs/{run_id}/attempts/{number}')
+            require(previous.get('id') == run_id and previous.get('run_attempt') == number
+                    and previous.get('head_sha') == run['head_sha']
+                    and previous.get('workflow_id') == run['workflow_id']
+                    and previous.get('event') == 'workflow_dispatch'
+                    and previous.get('path') == run['path']
+                    and previous.get('status') == 'completed')
+            rows = jobs if number == attempt else api.jobs(run_id, number)
+            require(rows and len({job['name'] for job in rows}) == len(rows))
+            for job in rows:
+                require(job.get('run_id') == run_id and job.get('head_sha') == run['head_sha']
+                        and job.get('status') == 'completed')
+                latest[job['name']] = job
+        jobs = list(latest.values())
     require(jobs and all(job['conclusion'] == 'success' for job in jobs))
     for row in TARGETS:
         matching = [job for job in jobs if job['name'].startswith('build (') and

@@ -49,7 +49,10 @@ Run the candidate workflow manually from `main`. It creates a draft tagged
 native job uploads only its new ZIP and SHA-256 file directly as Release assets,
 without using Actions artifact storage. After all eight targets pass, the draft
 becomes a prerelease, never marked Latest. Failed builds leave the release a draft;
-inspect step logs and job summaries, then rerun all jobs for a new candidate tag.
+inspect step logs and job summaries. Infrastructure failures may rerun only failed
+jobs at the same immutable run SHA, retaining the original candidate tag and passed
+targets. Acceptance verifies every attempt's SHA and the latest result of every
+required job. Changed shipping source requires a new full candidate run.
 
 Candidates do not publish production releases or alter the live update catalog.
 Signing credentials are configured separately by authorized maintainers and are
