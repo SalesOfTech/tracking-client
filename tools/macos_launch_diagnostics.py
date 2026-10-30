@@ -23,10 +23,12 @@ def probe_launch(app, directory, inspect_command):
     inspect_command(['lipo', '-archs', executable])
     inspect_command(['xattr', '-l', app])
     inspect_command(['open', '-h'])
+    directory.mkdir(parents=True, exist_ok=True)
     home = directory / 'launch-home'
     home.mkdir()
     temporary = directory / 'launch-tmp'
     temporary.mkdir()
+    results = []
     for method in ('launchservices', 'direct'):
         marker = directory / (method + '-health.json')
         env = dict(os.environ, HOME=str(home), TMPDIR=str(temporary) + '/',
@@ -38,12 +40,12 @@ def probe_launch(app, directory, inspect_command):
                     '-a', str(app), '--args', '--health-check']
         try:
             result = run_frozen(args, env, timeout=120)
-            print(json.dumps({'launch_method': method, 'exit_code': result.returncode,
+            outcome = {'launch_method': method, 'exit_code': result.returncode,
                 'health': json.loads(marker.read_text()) if marker.exists() else None,
-                'stderr': result.stderr.decode(errors='replace')[-6000:]}), flush=True)
+                'stderr': result.stderr.decode(errors='replace')[-6000:]}
         except subprocess.TimeoutExpired:
-            print(json.dumps({'launch_method': method, 'timeout': True,
-                              'health_marker': marker.exists()}), flush=True)
+            outcome = {'launch_method': method, 'timeout': True,
+                       'health_marker': marker.exists()}
         finally:
             # LaunchServices children need not descend from open(1).
             owned = []
@@ -61,3 +63,18 @@ def probe_launch(app, directory, inspect_command):
                 except psutil.NoSuchProcess:
                     pass
             psutil.wait_procs(alive, timeout=10)
+        results.append(outcome)
+        print(json.dumps(outcome), flush=True)
+    return results
+
+
+def assert_launch_results(results):
+    for method in ('launchservices', 'direct'):
+        matches = [result for result in results if result.get('launch_method') == method]
+        if len(matches) != 1:
+            raise AssertionError('Missing or duplicate launch result: ' + method)
+        result = matches[0]
+        health = result.get('health') or {}
+        if result.get('timeout') or result.get('exit_code') != 0 or \
+                health.get('ready') is not True or health.get('ui') != 'electron':
+            raise AssertionError('Installer startup not confirmed: ' + method)

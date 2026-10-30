@@ -1,5 +1,6 @@
 """Read-only release diagnostics on an isolated Mac; never publishes or enrolls."""
 import hashlib
+import argparse
 import json
 import os
 from pathlib import Path
@@ -18,13 +19,14 @@ TARGET = 'macos-arm64-modern'
 PINS = {
     '3.4.2': 'af7fa96621d586ab80f0af68afa6ed8904b1054d5d737d0bc057b23f1062aaa0',
     '3.5.0': '5553576a2ede5d85126aeb3f459f315d48d782b62532d933c3a7c9549cb58526',
+    '3.5.1': '02af4290d51dfd25f6e9c605216830baa1a1d691999e39869fbcc328cca8e361',
 }
 KEYS = {'pilot-2026': 'CZ2p3MojEDv9sgCmxjJZCxGrR2q2bYO8bBZ04XS0EPw='}
 sys.path.insert(0, str(ROOT / 'agent'))
 from agent_tracker.core.signed_updates import stage_archive
 from smoke_published import stage_published_archive
 from macos_archive import verify_frozen
-from macos_launch_diagnostics import probe_launch
+from macos_launch_diagnostics import probe_launch, assert_launch_results
 
 
 def inspect_command(args):
@@ -56,7 +58,7 @@ def download(version, root):
     return path
 
 
-def main():
+def historical_main():
     if platform.system() != 'Darwin' or platform.machine() != 'arm64':
         raise RuntimeError('Requires native macOS Apple Silicon')
     inspect_command(['sw_vers'])
@@ -64,7 +66,7 @@ def main():
     inspect_command(['spctl', '--status'])
     with tempfile.TemporaryDirectory(prefix='tracking-macos-diagnostic-') as folder:
         root = Path(folder)
-        for version in PINS:
+        for version in ('3.4.2', '3.5.0'):
             bundle = download(version, root)
             directory = root / version
             setup = directory / 'setup-payload'
@@ -121,6 +123,68 @@ def main():
         subprocess.run([sys.executable, str(ROOT / 'tools/smoke_update.py'), str(root / '3.4.2'),
                         str(root / '3.5.0'), '--published'], env=env, check=True, timeout=1200)
         print('PASS native installed startup/activation/rollback. NOT proof of unattended network update or Gatekeeper approval.', flush=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--historical', action='store_true')
+    parser.add_argument('--quarantine', action='store_true')
+    args = parser.parse_args()
+    if args.historical:
+        return historical_main()
+    if platform.system() != 'Darwin' or platform.machine() != 'arm64':
+        raise RuntimeError('Requires native macOS Apple Silicon')
+    inspect_command(['sw_vers'])
+    inspect_command(['uname', '-m'])
+    inspect_command(['spctl', '--status'])
+    results = {}
+    with tempfile.TemporaryDirectory(prefix='tracking-macos-launch-') as folder:
+        root = Path(folder)
+        bundle = download('3.5.1', root)
+        dmg = root / 'SOFT-Tracking-Setup.dmg'
+        with zipfile.ZipFile(bundle) as archive:
+            metadata = json.loads(archive.read(TARGET + '/setup.json'))
+            name = metadata['file']
+            if name != 'SOFT-Tracking-Setup-3.5.1.dmg':
+                raise ValueError('Unexpected installer filename')
+            with archive.open(TARGET + '/' + name) as source, dmg.open('xb') as output:
+                shutil.copyfileobj(source, output)
+        if hashlib.sha256(dmg.read_bytes()).hexdigest() != metadata['sha256']:
+            raise ValueError('Installer digest mismatch')
+        if args.quarantine:
+            # Separate CI machines avoid approval/LaunchServices caches from a previous local launch.
+            subprocess.run(['xattr', '-w', 'com.apple.quarantine',
+                            '0083;' + format(int(time.time()), 'x') + ';Chrome;' + str(uuid.uuid4()),
+                            str(dmg)], check=True)
+        print(json.dumps({'version': '3.5.1', 'download_quarantine': args.quarantine}), flush=True)
+        inspect_command(['spctl', '--assess', '--type', 'open', '--context',
+                         'context:primary-signature', '--verbose=4', dmg])
+        mount = root / 'mount'
+        mount.mkdir()
+        subprocess.run(['hdiutil', 'attach', '-readonly', '-nobrowse', '-mountpoint', str(mount), str(dmg)],
+                       check=True, timeout=90, stdout=subprocess.DEVNULL)
+        try:
+            apps = list(mount.glob('*.app'))
+            if len(apps) != 1:
+                raise ValueError('Unexpected installer disk image')
+            verify_frozen(apps[0] / 'Contents/MacOS/SOFT-Tracking-Setup', apps[0])
+            inspect_command(['spctl', '--assess', '--type', 'execute', '--verbose=4', apps[0]])
+            results['mounted_dmg'] = probe_launch(apps[0], root / 'mounted-probe', inspect_command)
+            copied = root / apps[0].name
+            subprocess.run(['ditto', str(apps[0]), str(copied)], check=True)
+            results['copied_app'] = probe_launch(copied, root / 'copied-probe', inspect_command)
+            inspect_command(['log', 'show', '--last', '8m', '--style', 'compact', '--predicate',
+                             '(process == "syspolicyd" OR process == "lsd" OR process == "amfid") '
+                             'AND (eventMessage CONTAINS[c] "SOFT" OR eventMessage CONTAINS[c] "Python")'])
+        finally:
+            subprocess.run(['hdiutil', 'detach', str(mount)], check=True, timeout=30)
+        print('LAUNCH SUMMARY ' + json.dumps(results), flush=True)
+        for location, outcomes in results.items():
+            try:
+                assert_launch_results(outcomes)
+            except AssertionError as error:
+                raise AssertionError(location + ': ' + str(error)) from error
+    print('PASS exact published installer startup. This is not a real browser/Finder consent test.', flush=True)
 
 
 if __name__ == '__main__':

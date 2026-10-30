@@ -9,6 +9,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [macos-14, macos-15, macos-26]
+        download: [local, quarantine]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -21,5 +22,12 @@ jobs:
           python-version: '3.12'
           architecture: arm64
       - run: python -m pip install -r agent/requirements-build.txt
-      - name: Inspect exact published packages and run native upgrade checks
-        run: python tools/diagnose_macos.py
+      - name: Launch exact published installer from mounted DMG and copied app
+        env:
+          DOWNLOAD_MODE: ${{ matrix.download }}
+        run: |
+          if [ "$DOWNLOAD_MODE" = quarantine ]; then
+            python tools/diagnose_macos.py --quarantine
+          else
+            python tools/diagnose_macos.py
+          fi
