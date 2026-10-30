@@ -7,6 +7,7 @@ from pathlib import Path
 import platform
 import plistlib
 import shutil
+import stat
 import struct
 import subprocess
 import tempfile
@@ -60,6 +61,35 @@ def frozen_metadata(executable):
             'python_entries': entries}
 
 
+def payload_metadata(bundle, version, root):
+    """Inspect the pinned published payload without staging or installing it."""
+    payload = root / 'runtime.zip'
+    with zipfile.ZipFile(bundle) as outer:
+        envelope = json.loads(outer.read(TARGET + '/manifest.json'))
+        with outer.open(TARGET + '/release-' + version + '.zip') as source, payload.open('xb') as output:
+            shutil.copyfileobj(source, output)
+    with zipfile.ZipFile(payload) as archive:
+        runtime = archive.getinfo('app/soft-tracking-app')
+        frameworks = {
+            item.filename: {'size': item.file_size, 'symlink': stat.S_ISLNK(item.external_attr >> 16)}
+            for item in archive.infolist() if 'Python.framework/' in item.filename
+        }
+    return {'manifest': envelope, 'runtime_bytes': runtime.file_size, 'framework_entries': frameworks}
+
+
+def detach_image(mount):
+    for attempt in range(3):
+        result = command('hdiutil', 'detach', mount)
+        if result.get('code') == 0:
+            return result
+        time.sleep(2)
+    # This is only the private read-only image mounted by this diagnostic job.
+    result = command('hdiutil', 'detach', '-force', mount)
+    if result.get('code') != 0:
+        raise RuntimeError('Could not detach diagnostic image: ' + json.dumps(result))
+    return result
+
+
 def launch(app, method, root, evidence):
     metadata = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
     executable = app / 'Contents/MacOS' / metadata['CFBundleExecutable']
@@ -105,6 +135,8 @@ def launch(app, method, root, evidence):
                     break
                 time.sleep(0.25)
             outcome['exit_code_before_cleanup'] = child.poll()
+            if outcome['normal_gui_ready']:
+                time.sleep(2)
             command('screencapture', '-x', evidence / (method + '.png'))
         finally:
             owned = []
@@ -138,6 +170,7 @@ def main(version, quarantine, evidence):
     with tempfile.TemporaryDirectory(prefix='tracking-installer-compare-') as folder:
         root = Path(folder)
         bundle = download(version, root)
+        report['payload'] = payload_metadata(bundle, version, root)
         dmg = root / 'setup.dmg'
         report['setup'] = extract_installer(bundle, version, dmg)
         if quarantine:
@@ -171,9 +204,10 @@ def main(version, quarantine, evidence):
             report['launches'] = [launch(app, method, root, evidence)
                                   for method in ('launchservices', 'direct')]
         finally:
-            subprocess.run(['hdiutil', 'detach', str(mount)], check=True, timeout=30)
+            # Save launch evidence before cleanup: a busy DMG must not erase it.
             (evidence / 'comparison.json').write_text(json.dumps(report, indent=2, default=str) + '\n')
             print(json.dumps(report, default=str), flush=True)
+            detach_image(mount)
     if not all(result['normal_gui_ready'] for result in report['launches']):
         raise AssertionError('Initial normal GUI did not open by every method; see comparison.json')
 
