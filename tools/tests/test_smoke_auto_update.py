@@ -237,9 +237,10 @@ class HarnessTests(unittest.TestCase):
             response = session.get(manifest['url'], timeout=5)
             self.assertEqual(hashlib.sha256(response.content).hexdigest(), manifest['sha256'])
             self.assertTrue(fixture.seen('catalog', self.baseline_version))
-            self.assertTrue(fixture.seen('download_complete'))
             session.headers.pop('Authorization')
             self.assertEqual(session.get(url, timeout=5).status_code, 401)
+        # server_close joins handlers; receipt of bytes can precede server bookkeeping.
+        self.assertTrue(fixture.seen('download_complete'))
         self.assertFalse(any(thread.name == 'auto-update-fixture' for thread in threading.enumerate()))
 
     def test_subprocess_uses_requests_environment_without_disabling_validation(self):

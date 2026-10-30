@@ -151,6 +151,8 @@ jobs:
           else
             python -m unittest discover -s agent/tests -v
           fi
+      - name: Packaging regression tests
+        run: python -m unittest discover -s tools/tests -v
       - name: Load repository signing secret
         env:
           TRACKING_UPDATE_KEY_B64: ${{ secrets.TRACKING_UPDATE_KEY_B64 }}
@@ -171,8 +173,6 @@ jobs:
           else
             python tools/smoke_package.py "artifacts/$RELEASE_TARGET/$RELEASE_VERSION/setup-payload"
           fi
-      - name: Packaging regression tests
-        run: python -m unittest discover -s tools/tests -v
       - name: Synthetic frozen update and crash rollback (not legacy acceptance)
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
