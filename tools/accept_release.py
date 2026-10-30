@@ -562,6 +562,11 @@ def accepted_jobs(api, plan):
     native = [job for job in jobs if job['name'].startswith('accept-')]
     expected = {'accept-' + row['target'] for row in TARGETS}
     require(len(native) == len(expected) == 8 and {job['name'] for job in native} == expected)
+    if '3.5.0' in upgrade_baselines(VERSION):
+        extra_names = {'verify-macos-15-arm64', 'verify-macos-26-arm64'}
+        extra = [job for job in jobs if job['name'] in extra_names]
+        require(len(extra) == 2 and {job['name'] for job in extra} == extra_names)
+        native.extend(extra)
     require(all(job['status'] == 'completed' and job['conclusion'] == 'success' for job in native))
     for job in native:
         steps = [step for step in job.get('steps', []) if step['name'] == SMOKE_STEP]

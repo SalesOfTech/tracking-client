@@ -504,6 +504,30 @@ class GateTests(unittest.TestCase):
         self.assertNotIn('private-url-and-output', output.getvalue())
         self.assertIn('upgrade-3.1.0 FAIL', output.getvalue())
 
+    def test_new_release_requires_extra_macos_native_acceptance(self):
+        api = Mock()
+        good = [{'name': 'accept-' + row['target'], 'status': 'completed', 'conclusion': 'success',
+                 'steps': [{'name': gate.SMOKE_STEP, 'conclusion': 'success'}]} for row in gate.TARGETS]
+        extra = [{'name': name, 'status': 'completed', 'conclusion': 'success',
+                  'steps': [{'name': gate.SMOKE_STEP, 'conclusion': 'success'}]}
+                 for name in ('verify-macos-15-arm64', 'verify-macos-26-arm64')]
+        with patch.object(gate, 'VERSION', '3.5.1'):
+            api.jobs.return_value = good + extra
+            gate.accepted_jobs(api, self.plan)
+            for change in ('missing', 'duplicate', 'failed', 'failed_step'):
+                rows = copy.deepcopy(extra)
+                if change == 'missing':
+                    rows.pop()
+                elif change == 'duplicate':
+                    rows[1] = rows[0]
+                elif change == 'failed':
+                    rows[0]['conclusion'] = 'failure'
+                else:
+                    rows[0]['steps'][0]['conclusion'] = 'failure'
+                api.jobs.return_value = good + rows
+                with self.subTest(change=change), self.assertRaises(ValueError):
+                    gate.accepted_jobs(api, self.plan)
+
     def test_missing_skipped_or_failed_smoke_step_cannot_promote(self):
         api = Mock()
         good = [{'name': 'accept-' + row['target'], 'status': 'completed', 'conclusion': 'success',

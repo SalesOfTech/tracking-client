@@ -113,9 +113,49 @@ jobs:
         if: always()
         run: python tools/accept_release.py cleanup
 
+  macos-extra:
+    name: verify-${{ matrix.runner }}-arm64
+    needs: prepare
+    environment: tracking-release-acceptance
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-26]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 50
+    env:
+      ACCEPTANCE_PLAN: ${{ needs.prepare.outputs.plan }}
+      RELEASE_TARGET: macos-arm64-modern
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+          architecture: arm64
+      - name: Verification dependencies
+        run: python -m pip install -r candidate/agent/requirements-build.txt
+      - name: Download and verify private baselines and exact candidate into runner temp
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRACKING_BASELINE_URLS: ${{ secrets.TRACKING_BASELINE_URLS }}
+        run: python tools/accept_release.py download
+      - name: All genuine published upgrades with all existing smoke assertions
+        run: python tools/accept_release.py test
+      - name: Delete private archives, captured output and isolated profiles
+        if: always()
+        run: python tools/accept_release.py cleanup
+
   promote:
-    needs: [prepare, accept]
-    if: github.ref == 'refs/heads/main' && needs.prepare.result == 'success' && needs.accept.result == 'success'
+    needs: [prepare, accept, macos-extra]
+    if: github.ref == 'refs/heads/main' && needs.prepare.result == 'success' && needs.accept.result == 'success' && needs.macos-extra.result == 'success'
     environment: tracking-release-acceptance
     permissions:
       contents: write
