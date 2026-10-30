@@ -69,14 +69,29 @@ def check(package, evidence):
         print(policy.stderr[-2000:], flush=True)
         # Opening a document in Apple's signed Installer is distinct from executing
         # our unsigned app. Capture any system consent prompt instead of hiding it.
-        opened = run('open', '-a', '/System/Library/CoreServices/Installer.app', package, check=False)
-        print('Installer document open: ' + str(opened.returncode), flush=True)
-        time.sleep(5)
-        run('screencapture', '-x', evidence / '01-package-open.png')
+        policy_ui_before = {p.pid for p in psutil.process_iter() if p.name() == 'CoreServicesUIAgent'}
+        opened = subprocess.Popen(['open', '-a', '/System/Library/CoreServices/Installer.app', str(package)],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            try:
+                opened.wait(timeout=5)
+                print('Installer document open: ' + str(opened.returncode), flush=True)
+            except subprocess.TimeoutExpired:
+                print('Package open awaits macOS trust UI; this is NOT automatic approval.', flush=True)
+            time.sleep(2)
+            run('screencapture', '-x', evidence / '01-package-open.png')
+        finally:
+            if opened.poll() is None:
+                opened.terminate()
+            opened.wait(timeout=10)
+            # Cancel only the consent UI created by this isolated probe. This does
+            # not approve the package or modify Gatekeeper policy.
+            stop([p for p in psutil.process_iter() if p.name() == 'CoreServicesUIAgent'
+                  and p.pid not in policy_ui_before])
         stop(installer_processes())
         # CLI authorization tests package execution AFTER the user's trust decision;
         # it is deliberately not reported as automated Gatekeeper consent.
-        installed = run('sudo', '-n', '/usr/sbin/installer', '-pkg', package, '-target', '/',
+        installed = run('sudo', '-n', '/usr/sbin/installer', '-dumplog', '-verboseR', '-pkg', package, '-target', '/',
                         timeout=240, check=False)
         print(installed.stdout[-6000:] + installed.stderr[-6000:], flush=True)
         if installed.returncode:
