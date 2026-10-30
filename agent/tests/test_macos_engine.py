@@ -40,7 +40,7 @@ class MacOSEngineTests(unittest.TestCase):
             with patch.object(sys, 'platform', 'darwin'), \
                     patch.object(sys, 'executable', str(contents/'MacOS/SOFT-Tracking-Setup')), \
                     patch.dict(os.environ, SOFT_TRACKING_SETUP_PAYLOAD=str(payload)):
-                self.assertEqual(setup_payload(), payload)
+                self.assertEqual(setup_payload(), payload.resolve())
                 with patch.dict(os.environ, SOFT_TRACKING_SETUP_PAYLOAD=temporary):
                     with self.assertRaises(ValueError):
                         setup_payload()
