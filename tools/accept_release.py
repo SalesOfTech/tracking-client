@@ -564,7 +564,9 @@ def automatic_failure_stage(path):
     stages = {'prepare', 'local-tls', 'old-launcher-start', 'old-runtime-ready',
               'automatic-catalog-fetch', 'automatic-archive-fetch', 'automatic-transition',
               'new-runtime-health', 'new-runtime-config', 'automatic-fetch-evidence',
-              'graceful-shutdown', 'process-cleanup', 'data-preservation'}
+              'graceful-shutdown', 'process-cleanup', 'data-preservation',
+              'fixture-unauthorized', 'fixture-unexpected', 'fixture-blocked-connect',
+              'fixture-server-error', 'fixture-server-disconnect'}
     try:
         with Path(path).open('rb') as log:
             log.seek(max(0, log.seek(0, os.SEEK_END) - 4096))

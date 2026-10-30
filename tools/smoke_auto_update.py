@@ -295,6 +295,9 @@ class LocalServer(ThreadingHTTPServer):
 
     def handle_error(self, *_args):
         self.fixture.record('server_error')
+        error = sys.exc_info()[1]
+        if isinstance(error, (ConnectionError, ssl.SSLError)):
+            self.fixture.record('server_disconnect')
 
 
 @contextmanager
@@ -520,9 +523,12 @@ def main(old, new, timeout=420):
                 STAGE = 'automatic-fetch-evidence'
                 require(fixture.seen('catalog', old_version) and fixture.seen('download_complete'),
                         'Original supervisor did not fetch the release automatically')
-                require(not fixture.seen('unauthorized') and not fixture.seen('unexpected')
-                        and not fixture.seen('blocked_connect') and not fixture.seen('server_error'),
-                        'Unexpected fixture traffic')
+                for kind in ('unauthorized', 'unexpected', 'blocked_connect', 'server_error'):
+                    if fixture.seen(kind):
+                        STAGE = 'fixture-' + kind.replace('_', '-')
+                        if kind == 'server_error' and fixture.seen('server_disconnect'):
+                            STAGE = 'fixture-server-disconnect'
+                        raise RuntimeError('Unexpected fixture traffic')
                 STAGE = 'graceful-shutdown'
                 atomic_json(root / 'stop-request.json', {'token': ready.stem})
                 require(process.wait(timeout=75) == 0, 'New runtime did not stop gracefully')
