@@ -262,11 +262,11 @@ class GateTests(unittest.TestCase):
                     patch.object(gate, 'private_root', return_value=self.root), \
                     patch.object(gate.subprocess, 'run') as run, redirect_stdout(io.StringIO()):
                 gate.test()
-            self.assertEqual(run.call_count, 9)
+            self.assertEqual(run.call_count, 10)
             automatic = [call for call in run.call_args_list if 'smoke_auto_update.py' in call.args[0][1]]
-            self.assertEqual(len(automatic), 1)
-            self.assertEqual(automatic[0].args[0][2], str(self.root / '3.5.0'))
-            self.assertTrue(automatic[0].kwargs['check'])
+            self.assertEqual([call.args[0][2] for call in automatic],
+                             [str(self.root / version) for version in ('3.5.0', '3.4.2')])
+            self.assertTrue(all(call.kwargs['check'] for call in automatic))
 
     def test_automatic_failure_exposes_only_known_stage(self):
         path = self.root / 'private.log'

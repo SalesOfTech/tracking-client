@@ -31,7 +31,7 @@ class SupervisorTests(unittest.TestCase):
 
     def test_update_error_is_reported_without_leaking_message_into_status(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / 'install'
+            root = Path(tmp).resolve() / 'install'
             root.mkdir()
             manager = Mock()
             manager.active.return_value = {'version': '3.5.0'}
@@ -58,7 +58,7 @@ class SupervisorTests(unittest.TestCase):
     def test_health_failure_rolls_back_reports_and_schedules_retry(self):
         for exit_code, expected_stage in ((1, 'health_exit'), (0, 'health_receipt')):
             with self.subTest(exit_code=exit_code), tempfile.TemporaryDirectory() as tmp:
-                root = Path(tmp) / 'install'
+                root = Path(tmp).resolve() / 'install'
                 root.mkdir()
                 manager = Mock()
                 manager.active.return_value = {'version': '3.5.0'}
@@ -88,7 +88,7 @@ class SupervisorTests(unittest.TestCase):
 
     def test_interrupted_update_reports_recovery_before_starting_old_runtime(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / 'install'
+            root = Path(tmp).resolve() / 'install'
             root.mkdir()
             atomic_json(root / 'pending.json', {'version': '3.5.1'})
             manager = Mock()
@@ -108,7 +108,7 @@ class SupervisorTests(unittest.TestCase):
 
     def test_retry_deadline_is_checked_before_the_normal_hourly_interval(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / 'install'
+            root = Path(tmp).resolve() / 'install'
             root.mkdir()
             atomic_json(root / 'failed.json', dict(version='3.5.1', attempts=1, retry_at=1900))
             manager = Mock()
@@ -133,7 +133,7 @@ class SupervisorTests(unittest.TestCase):
 
     def test_manual_request_bypasses_hourly_interval_without_spawning_another_updater(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             atomic_json(root / 'current.json', {'version': '3.4.0'})
             manager = Mock()
             manager.active.return_value = {'version': '3.4.0'}
@@ -164,7 +164,7 @@ class SupervisorTests(unittest.TestCase):
 
     def test_retained_320_launcher_enters_current_payload_but_cannot_start_runtime(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / 'install'
+            root = Path(tmp).resolve() / 'install'
             root.mkdir()
             (root / 'current.json').write_text('{"version":"3.2.1"}')
             # Contents are immaterial: even an incomplete intent marker must block startup.
@@ -187,7 +187,7 @@ class SupervisorTests(unittest.TestCase):
 
     def test_marker_arriving_during_initialization_blocks_first_runtime(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / 'install'
+            root = Path(tmp).resolve() / 'install'
             root.mkdir()
             manager = Mock()
             manager.session.headers = {}
@@ -206,7 +206,7 @@ class SupervisorTests(unittest.TestCase):
 
     def test_marker_blocks_update_health_runtime_and_rolls_back_candidate(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / 'install'
+            root = Path(tmp).resolve() / 'install'
             root.mkdir()
             manager = Mock()
             manager.session.headers = {}
@@ -232,7 +232,7 @@ class SupervisorTests(unittest.TestCase):
 
     def test_pending_uninstall_skips_updates_while_child_stops(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / 'install'
+            root = Path(tmp).resolve() / 'install'
             root.mkdir()
             manager = Mock()
             manager.session.headers = {}
@@ -252,7 +252,7 @@ class SupervisorTests(unittest.TestCase):
 
     def test_checks_updates_on_first_tick_without_prompt_and_clears_old_error(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / 'install'
+            root = Path(tmp).resolve() / 'install'
             root.mkdir()
             manager = Mock()
             manager.active.return_value = {'version':'3.1.0'}
@@ -270,7 +270,7 @@ class SupervisorTests(unittest.TestCase):
 
     def test_failed_release_remains_visible_when_check_returns_no_update(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             (root / 'failed.json').write_text('{"version":"3.3.1"}')
             manager = Mock()
             manager.active.return_value = {'version': '3.3.0'}

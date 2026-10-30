@@ -93,7 +93,7 @@ permanently blacklist an update. Manual checks still respect rollback cooldown.
 The first upgrade from an older client still runs that client's updater. A failed
 3.5.0 marker does not block the distinct 3.5.1 release, but retry and diagnostic
 improvements cannot repair an older executable that cannot start at all. Stable
-acceptance includes the genuine 3.5.0 frozen supervisor fetching and installing
+acceptance includes the genuine 3.4.2 and 3.5.0 frozen supervisors fetching and installing
 the signed candidate through an isolated HTTPS fixture, without a new installer.
 
 The supervisor queues credential-free `diagnostic` events with category `update`,

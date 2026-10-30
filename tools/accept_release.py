@@ -522,7 +522,7 @@ def test():
             STAGE += '-process-timeout'
             raise
         print(row['target'] + ' ' + old + ' PASS', flush=True)
-        if old == '3.5.0':
+        if '3.5.0' in upgrade_baselines(VERSION) and old in {'3.5.0', '3.4.2'}:
             STAGE = 'automatic-update-' + old
             path = root / (old + '.automatic.private.log')
             try:

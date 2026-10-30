@@ -3,7 +3,8 @@
 OLD/NEW have the same layout as smoke_update.py (verified setup-payload directories;
 NEW also has manifest.json and release-VERSION.zip). The caller must authenticate
 the published baseline/candidate artifacts, as accept_release.download does.
-Only baseline 3.5.0 is supported. Run on the matching native desktop CI runner
+Only baselines 3.4.2 and 3.5.0 are supported, inferred from verified OLD metadata.
+Run on the matching native desktop CI runner
 (Linux needs a display), with the build requirements and OpenSSL on PATH.
 
 No candidate installer or source ReleaseManager drives the upgrade. The original
@@ -16,7 +17,7 @@ shipping binary, production service, or OS integration is modified.
 
 This tests automatic updates, not real enrollment, production connectivity, OS
 startup registration, or retrying the SAME failed version. A legacy failed.json
-for 3.5.0 must not block the NEW version. Unit fixtures are not native acceptance.
+for the baseline must not block the NEW version. Unit fixtures are not native acceptance.
 """
 from __future__ import annotations
 
@@ -42,7 +43,7 @@ from urllib.parse import urlsplit
 import psutil
 
 ROOT = Path(__file__).resolve().parents[1]
-BASELINE = '3.5.0'
+SUPPORTED_BASELINES = frozenset({'3.4.2', '3.5.0'})
 HOSTS = ('tracking.salesoftech.com', 'tracking.salesof.tech')
 STAGE = 'arguments'
 
@@ -87,12 +88,15 @@ def executable(native=False, bootstrap=False):
 def prepare_install(old, new, root, signed, atomic_json):
     bundle = old / 'setup-payload'
     build = read_json(bundle / 'setup-build.json')
+    require(isinstance(build, dict) and isinstance(build.get('version'), str)
+            and build['version'] in SUPPORTED_BASELINES, 'Unsupported automatic-update baseline')
+    old_version = build['version']
     keys = read_json(bundle / 'trusted-update-keys.json')
     baseline = signed.verify_manifest(read_json(bundle / 'manifest.json'), keys, '0.0.0',
                                       build['os'], build['architecture'])
-    require(baseline['version'] == BASELINE, 'Automatic acceptance requires published baseline 3.5.0')
+    require(baseline['version'] == old_version, 'Signed baseline does not match setup metadata')
     candidate_bytes = (new / 'manifest.json').read_bytes()
-    candidate = signed.verify_manifest(json.loads(candidate_bytes), keys, BASELINE,
+    candidate = signed.verify_manifest(json.loads(candidate_bytes), keys, old_version,
                                        build['os'], build['architecture'])
     require(candidate['target'] == baseline['target'] == build['target'], 'Release target mismatch')
     require(signed.runtime_compatible(baseline) and signed.runtime_compatible(candidate),
@@ -106,19 +110,19 @@ def prepare_install(old, new, root, signed, atomic_json):
     require(archive.stat().st_size == candidate['size'] and digest(archive) == candidate['sha256'],
             'Candidate archive does not match signed manifest')
     root.mkdir(mode=0o700)
-    payload = root / 'versions' / BASELINE
+    payload = root / 'versions' / old_version
     signed.stage_archive(bundle / 'release.zip', baseline, payload)
     installed = read_json(payload / 'build.json')
-    require(installed['version'] == BASELINE and installed['target'] == baseline['target']
+    require(installed['version'] == old_version and installed['target'] == baseline['target']
             and installed.get('launcher_protocol') == 1, 'Invalid baseline installation layout')
     for native in (False, True):
         name = executable(native, bootstrap=True)
         shutil.copy2(payload / 'launcher' / name, root / name)
     shutil.copytree(payload / 'extension', root / 'extension')
-    atomic_json(root / 'current.json', {'version': BASELINE})
+    atomic_json(root / 'current.json', {'version': old_version})
     atomic_json(root / 'trusted-update-keys.json', keys)
     atomic_json(root / 'enrollment.json', {'company_code': 'a' * 32})
-    atomic_json(root / 'failed.json', {'version': BASELINE, 'time': int(time.time())})
+    atomic_json(root / 'failed.json', {'version': old_version, 'time': int(time.time())})
     return installed, candidate, candidate_bytes, archive
 
 
@@ -455,6 +459,7 @@ def main(old, new, timeout=420):
         directory = Path(temporary).resolve()
         root = directory / 'install'
         baseline, manifest, envelope, archive = prepare_install(Path(old), Path(new), root, signed, atomic_json)
+        old_version = baseline['version']
         version = manifest['version']
         bootstraps = {executable(native, True): digest(root / executable(native, True)) for native in (False, True)}
         keyring = digest(root / 'trusted-update-keys.json')
@@ -471,15 +476,15 @@ def main(old, new, timeout=420):
             tree = ProcessTree(process)
             try:
                 STAGE = 'old-runtime-ready'
-                old_ready = wait_for(tree, lambda children: runtime_ready(children, root, BASELINE), 60,
+                old_ready = wait_for(tree, lambda children: runtime_ready(children, root, old_version), 60,
                                      'Original frozen supervisor/runtime not ready')
                 assert_ui_health(old_ready, baseline)
-                assert_electron_child(tree.snapshot(), root / 'versions' / BASELINE / 'app', baseline)
-                require(read_json(root / 'failed.json')['version'] == BASELINE, 'Legacy failure fixture missing')
+                assert_electron_child(tree.snapshot(), root / 'versions' / old_version / 'app', baseline)
+                require(read_json(root / 'failed.json')['version'] == old_version, 'Legacy failure fixture missing')
                 fixture.release.set()
                 transition_deadline = time.monotonic() + timeout
                 STAGE = 'automatic-catalog-fetch'
-                wait_for(tree, lambda _: fixture.seen('catalog', BASELINE), timeout,
+                wait_for(tree, lambda _: fixture.seen('catalog', old_version), timeout,
                          'Original supervisor did not request the catalog')
                 STAGE = 'automatic-archive-fetch'
                 wait_for(tree, lambda _: fixture.seen('download_complete'),
@@ -489,7 +494,7 @@ def main(old, new, timeout=420):
                 def upgraded(children):
                     if read_json(root / 'current.json', {}).get('version') != version:
                         return None
-                    if read_json(root / 'last-good.json', {}) != {'version': version, 'previous_version': BASELINE}:
+                    if read_json(root / 'last-good.json', {}) != {'version': version, 'previous_version': old_version}:
                         return None
                     if (root / 'pending.json').exists():
                         return None
@@ -510,7 +515,7 @@ def main(old, new, timeout=420):
                 STAGE = 'new-runtime-config'
                 wait_for(tree, lambda _: fixture.seen('config', version), 30, 'New runtime did not contact fixture')
                 STAGE = 'automatic-fetch-evidence'
-                require(fixture.seen('catalog', BASELINE) and fixture.seen('download_complete'),
+                require(fixture.seen('catalog', old_version) and fixture.seen('download_complete'),
                         'Original supervisor did not fetch the release automatically')
                 require(not fixture.seen('unauthorized') and not fixture.seen('unexpected')
                         and not fixture.seen('blocked_connect') and not fixture.seen('server_error'),
@@ -536,7 +541,7 @@ def main(old, new, timeout=420):
         require(read_json(root / 'extension/manifest.json') ==
                 read_json(root / 'versions' / version / 'extension/manifest.json'), 'Extension did not switch')
     STAGE = 'complete'
-    print('PASS: frozen ' + BASELINE + ' -> ' + version +
+    print('PASS: frozen ' + old_version + ' -> ' + version +
           ' automatic HTTPS fetch, signed update, health confirmation, launcher restart, '
           'old failed.json bypass, identity/queue retained; temporary files/processes removed', flush=True)
 

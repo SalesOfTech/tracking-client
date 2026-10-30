@@ -42,7 +42,7 @@ class ReleaseTests(unittest.TestCase):
         migration = patch('agent_tracker.legacy_migration.replace_current_user')
         self.migration = migration.start()
         self.addCleanup(migration.stop)
-        self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)/'install';self.root.mkdir()
+        self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name).resolve()/'install';self.root.mkdir()
         self.key=SigningKey.generate()
         public=base64.b64encode(bytes(self.key.verify_key)).decode()
         self.keys={'test':public}
@@ -57,7 +57,7 @@ class ReleaseTests(unittest.TestCase):
     def tearDown(self): self.tmp.cleanup()
     def package(self,version='3.0.1',permissions=None):
         build=dict(self.old,version=version)
-        archive=Path(self.tmp.name)/('release-'+version+'.zip')
+        archive=Path(self.tmp.name).resolve()/('release-'+version+'.zip')
         extension=dict(self.extension,version=version)
         if permissions is not None: extension['permissions']=permissions
         with zipfile.ZipFile(archive,'w') as package:
@@ -87,7 +87,7 @@ class ReleaseTests(unittest.TestCase):
         old_app=self.root/'versions/3.0.0/app'/executable_name()
         old_app.parent.mkdir();old_app.write_bytes(b'old application')
         atomic_json(self.root/'enrollment.json',{'company_code':'a'*32})
-        bundle=Path(self.tmp.name)/'bundle';bundle.mkdir()
+        bundle=Path(self.tmp.name).resolve()/'bundle';bundle.mkdir()
         archive,manifest,envelope=self.package()
         (bundle/'release.zip').write_bytes(archive.read_bytes())
         atomic_json(bundle/'manifest.json',envelope)
@@ -241,7 +241,7 @@ class ReleaseTests(unittest.TestCase):
     def test_cleanup_does_not_follow_redirected_orphan_parent(self):
         manager = ReleaseManager(self.root)
         artifact = self.failed_artifact(manager)
-        outside = Path(self.tmp.name) / 'outside'
+        outside = Path(self.tmp.name).resolve() / 'outside'
         artifact.parent.rename(outside)
         try:
             artifact.parent.symlink_to(outside, target_is_directory=True)
@@ -342,12 +342,12 @@ class ReleaseTests(unittest.TestCase):
 
     def installer_fixture(self):
         archive,manifest,envelope=self.package()
-        bundle=Path(self.tmp.name)/'setup';bundle.mkdir()
+        bundle=Path(self.tmp.name).resolve()/'setup';bundle.mkdir()
         (bundle/'release.zip').write_bytes(archive.read_bytes())
         atomic_json(bundle/'manifest.json',envelope)
         atomic_json(bundle/'trusted-update-keys.json',self.keys)
         atomic_json(bundle/'setup-build.json',manifest)
-        root=Path(self.tmp.name)/'new-install'
+        root=Path(self.tmp.name).resolve()/'new-install'
         install(bundle,root,'a'*32,integrate=False)
         return bundle, root
 
@@ -362,8 +362,8 @@ class ReleaseTests(unittest.TestCase):
     def test_fresh_install_registers_real_startup_with_stable_launcher(self):
         from agent_tracker import integration
         bundle, _ = self.installer_fixture()
-        root = Path(self.tmp.name) / 'fresh-install'
-        startup = Path(self.tmp.name) / 'login' / 'soft.desktop'
+        root = Path(self.tmp.name).resolve() / 'fresh-install'
+        startup = Path(self.tmp.name).resolve() / 'login' / 'soft.desktop'
         with patch('agent_tracker.installer.protect_workspace'), patch('agent_tracker.installer.register_host'), \
                 patch('agent_tracker.installer.shortcuts'), patch.object(integration, '_system', return_value='linux'), \
                 patch.object(integration, '_startup_path', return_value=startup):
@@ -376,7 +376,7 @@ class ReleaseTests(unittest.TestCase):
     def test_same_version_setup_repairs_startup_without_stopping_or_replacing_data(self):
         from agent_tracker import integration
         bundle, root = self.installer_fixture()
-        startup = Path(self.tmp.name) / 'login' / 'soft.desktop'
+        startup = Path(self.tmp.name).resolve() / 'login' / 'soft.desktop'
         before = (root/'enrollment.json').read_bytes(), (root/'current.json').read_bytes()
         with patch.object(integration, '_system', return_value='linux'), \
                 patch.object(integration, '_startup_path', return_value=startup), \
@@ -389,7 +389,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_optional_legacy_retirement_preserves_new_and_existing_integrations(self):
         bundle, root = self.installer_fixture()
-        fresh = Path(self.tmp.name) / 'fresh-opt-out'
+        fresh = Path(self.tmp.name).resolve() / 'fresh-opt-out'
         with patch('agent_tracker.installer.protect_workspace'), patch('agent_tracker.installer.register_host'), \
                 patch('agent_tracker.installer.shortcuts'), patch('agent_tracker.installer.autostart'):
             install(bundle, fresh, 'a'*32, retire_legacy=False)

@@ -27,6 +27,8 @@ from agent_tracker.core.target import runtime_target
 
 
 class HarnessTests(unittest.TestCase):
+    baseline_version = '3.5.0'
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix='auto-update-unit-')
         self.addCleanup(temporary.cleanup)
@@ -37,7 +39,7 @@ class HarnessTests(unittest.TestCase):
         self.old.mkdir()
         self.new.mkdir()
         self.target = '-'.join((*runtime_target(), 'modern'))
-        self.baseline = self.bundle(self.old, '3.5.0')
+        self.baseline = self.bundle(self.old, self.baseline_version)
         self.candidate = self.bundle(self.new, '3.5.1')
 
     def envelope(self, manifest):
@@ -73,21 +75,49 @@ class HarnessTests(unittest.TestCase):
     def test_only_old_frozen_payload_is_installed_and_failure_is_legacy(self):
         baseline, candidate, envelope, archive = self.prepare()
         root = self.root / 'install'
-        self.assertEqual(baseline['version'], '3.5.0')
+        self.assertEqual(baseline['version'], self.baseline_version)
         self.assertEqual(candidate, self.candidate)
         self.assertEqual(envelope, (self.new / 'manifest.json').read_bytes())
         self.assertEqual(smoke.digest(archive), candidate['sha256'])
         self.assertFalse((root / 'versions/3.5.1').exists())
-        self.assertEqual(smoke.read_json(root / 'current.json'), {'version': '3.5.0'})
+        self.assertEqual(smoke.read_json(root / 'current.json'), {'version': self.baseline_version})
         self.assertEqual(set(smoke.read_json(root / 'failed.json')), {'version', 'time'})
-        self.assertEqual(smoke.read_json(root / 'failed.json')['version'], '3.5.0')
+        self.assertEqual(smoke.read_json(root / 'failed.json')['version'], self.baseline_version)
         self.assertFalse((root / 'update-request.json').exists())
 
     def test_rejects_other_baseline_even_with_valid_signature(self):
-        value = dict(self.baseline, version='3.4.2')
+        self.assertEqual(smoke.SUPPORTED_BASELINES, {'3.4.2', '3.5.0'})
+        value = dict(self.baseline, version='3.4.0')
+        atomic_json(self.old / 'setup-payload/setup-build.json', value)
         atomic_json(self.old / 'setup-payload/manifest.json', self.envelope(value))
-        with self.assertRaisesRegex(RuntimeError, 'requires published baseline'):
+        with self.assertRaisesRegex(RuntimeError, 'Unsupported automatic-update baseline'):
             self.prepare()
+        self.assertFalse((self.root / 'install').exists())
+
+    def test_rejects_mismatched_supported_setup_and_signed_versions(self):
+        other = next(version for version in smoke.SUPPORTED_BASELINES if version != self.baseline_version)
+        value = dict(self.baseline, version=other)
+        atomic_json(self.old / 'setup-payload/setup-build.json', value)
+        with self.assertRaisesRegex(RuntimeError, 'Signed baseline does not match setup metadata'):
+            self.prepare()
+        self.assertFalse((self.root / 'install').exists())
+
+    def test_rejects_invalid_setup_metadata_before_installation(self):
+        for build in (None, [], {}, {'version': ['3.4.2']}, {'version': 342}, {'version': '../3.4.2'}):
+            atomic_json(self.old / 'setup-payload/setup-build.json', build)
+            with self.subTest(build=build), self.assertRaisesRegex(RuntimeError, 'Unsupported automatic-update baseline'):
+                self.prepare()
+            self.assertFalse((self.root / 'install').exists())
+
+    def test_rejects_signed_archive_with_mismatched_embedded_build_version(self):
+        archive = self.old / 'setup-payload/release.zip'
+        with zipfile.ZipFile(archive, 'w') as package:
+            package.writestr('build.json', json.dumps(dict(self.baseline, version='3.4.0')))
+        manifest = dict(self.baseline, size=archive.stat().st_size, sha256=smoke.digest(archive))
+        atomic_json(self.old / 'setup-payload/manifest.json', self.envelope(manifest))
+        with self.assertRaisesRegex(RuntimeError, 'Invalid baseline installation layout'):
+            self.prepare()
+        self.assertFalse((self.root / 'install/current.json').exists())
 
     def test_candidate_cannot_install_its_own_trust_key(self):
         self.key = SigningKey.generate()
@@ -99,7 +129,7 @@ class HarnessTests(unittest.TestCase):
         self.assertFalse((self.root / 'install').exists())
 
     def test_candidate_downgrade_wrong_target_external_origin_and_bad_hash_fail(self):
-        for change in ({'version': '3.5.0'}, {'target': 'linux-arm64-legacy'},
+        for change in ({'version': self.baseline_version}, {'version': '3.4.0'}, {'target': 'linux-arm64-legacy'},
                        {'url': 'https://example.test/release.zip'}, {'sha256': '0' * 64}):
             atomic_json(self.new / 'manifest.json', self.envelope(dict(self.candidate, **change)))
             with self.subTest(change=change), self.assertRaises((RuntimeError, ValueError)):
@@ -177,7 +207,7 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(smoke.runtime_ready([supervisor, runtime], root, '3.5.1'), marker)
         runtime.cmdline.return_value = [str(path), '--health-check']
         self.assertIsNone(smoke.runtime_ready([supervisor, runtime], root, '3.5.1'))
-        self.assertIsNone(smoke.runtime_ready([supervisor, runtime], root, '3.5.0'))
+        self.assertIsNone(smoke.runtime_ready([supervisor, runtime], root, self.baseline_version))
 
     def fixture(self):
         cert, tls = smoke.make_certificate(self.root)
@@ -201,12 +231,12 @@ class HarnessTests(unittest.TestCase):
         with smoke.local_server(fixture, tls) as proxy:
             session = self.session(proxy, cert)
             url = 'https://' + smoke.HOSTS[0] + fixture.catalog
-            response = session.get(url, headers={'X-Tracking-Client-Version': '3.5.0'}, timeout=5)
+            response = session.get(url, headers={'X-Tracking-Client-Version': self.baseline_version}, timeout=5)
             self.assertEqual(response.content, fixture.envelope)
-            manifest = signed.verify_manifest(response.json(), self.keys, '3.5.0', *runtime_target())
+            manifest = signed.verify_manifest(response.json(), self.keys, self.baseline_version, *runtime_target())
             response = session.get(manifest['url'], timeout=5)
             self.assertEqual(hashlib.sha256(response.content).hexdigest(), manifest['sha256'])
-            self.assertTrue(fixture.seen('catalog', '3.5.0'))
+            self.assertTrue(fixture.seen('catalog', self.baseline_version))
             self.assertTrue(fixture.seen('download_complete'))
             session.headers.pop('Authorization')
             self.assertEqual(session.get(url, timeout=5).status_code, 401)
@@ -280,7 +310,7 @@ class HarnessTests(unittest.TestCase):
         result = subprocess.run([sys.executable, '-B', str(ROOT / 'tools/smoke_auto_update.py'),
                                  str(self.root / 'private-old'), str(self.new)], capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(result.stdout.decode().strip(), 'FAIL: automatic-update stage=prepare exception=TypeError')
+        self.assertEqual(result.stdout.decode().strip(), 'FAIL: automatic-update stage=prepare exception=RuntimeError')
         self.assertNotIn(str(self.root).encode(), result.stdout + result.stderr)
 
     def test_tool_has_no_installer_or_release_manager_update_calls(self):
@@ -289,6 +319,10 @@ class HarnessTests(unittest.TestCase):
         calls = {node.func.attr for node in ast.walk(tree) if isinstance(node, ast.Call)
                  and isinstance(node.func, ast.Attribute)}
         self.assertFalse(calls & {'activate', 'confirm', 'rollback', 'install', 'upgrade_existing', 'check', 'download'})
+
+
+class Baseline342HarnessTests(HarnessTests):
+    baseline_version = '3.4.2'
 
 
 if __name__ == '__main__':
