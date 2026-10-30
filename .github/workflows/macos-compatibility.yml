@@ -52,7 +52,7 @@ jobs:
           root=artifacts/$RELEASE_TARGET/3.5.1-rc.1
           python tools/check_macos_floor.py --major "${{ matrix.floor }}" "$root/payload/app/soft-tracking-app" "$root/payload/app/soft-tracking-host-app" "$root/payload/launcher/soft-tracking" "$root/payload/launcher/soft-tracking-host" "$root/SOFT-Tracking-Setup.app/Contents/MacOS/SOFT-Tracking-Setup"
       - name: Frozen installation and runtime health on available native runner
-        run: python tools/smoke_package.py artifacts/$RELEASE_TARGET/3.5.1-rc.1
+        run: python tools/smoke_package.py artifacts/$RELEASE_TARGET/3.5.1-rc.1/setup-payload
       - name: Remove disposable binaries and key
         if: always()
         run: |
