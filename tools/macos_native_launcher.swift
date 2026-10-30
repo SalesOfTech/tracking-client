@@ -259,7 +259,11 @@ do {
         try launch(app, role: selectedRole, wrapper: wrapper, arguments: originalArguments)
     }
 } catch let failure as Failure {
-    report(failure, setup: isSetup, arguments: originalArguments)
+    MainActor.assumeIsolated {
+        report(failure, setup: isSetup, arguments: originalArguments)
+    }
 } catch {
-    report(.io, setup: isSetup, arguments: originalArguments)
+    MainActor.assumeIsolated {
+        report(.io, setup: isSetup, arguments: originalArguments)
+    }
 }
