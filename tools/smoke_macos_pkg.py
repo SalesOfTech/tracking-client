@@ -44,6 +44,17 @@ def stop(processes):
     psutil.wait_procs(alive, timeout=10)
 
 
+def processes_with_argument(argument):
+    matches = []
+    for process in psutil.process_iter():
+        try:
+            if argument in process.cmdline():
+                matches.append(process)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    return matches
+
+
 def check(package, evidence):
     if platform.system() != 'Darwin' or platform.machine() != 'arm64' or os.geteuid() == 0:
         raise RuntimeError('Requires an isolated native ARM runner user')
@@ -133,8 +144,7 @@ def check(package, evidence):
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
         assert normal_ui, 'No normal installer UI under console user'
-        runners = [p for p in psutil.process_iter()
-                   if str(marker.parent / 'runner.sh') in p.cmdline()]
+        runners = processes_with_argument(str(marker.parent / 'runner.sh'))
         assert len(runners) == 1, 'Expected one package launch supervisor'
         assert all(os.getpgid(p.pid) != os.getpgid(runners[0].pid) for p in normal_ui), \
             'Setup must not share the temporary launchd job process group'

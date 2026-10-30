@@ -62,6 +62,13 @@ jobs:
         run: python tools/smoke_macos_pilot.py "artifacts/$RELEASE_TARGET/$RELEASE_VERSION/SOFT-Tracking-Setup.dmg"
       - name: Build single PKG from this exact verified application
         run: python tools/macos_pkg.py "$RUNNER_TEMP/package" --image "artifacts/$RELEASE_TARGET/$RELEASE_VERSION/SOFT-Tracking-Setup.dmg"
+      - name: Retain exact candidate for diagnostics without rebuilding
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: arm-package-candidate
+          path: ${{ runner.temp }}/package
+          retention-days: 1
+          compression-level: 0
       - name: Normal package GUI acceptance
         run: python tools/smoke_macos_pkg.py "$RUNNER_TEMP/package/SOFT-Tracking-Setup-ARM.pkg" "$RUNNER_TEMP/evidence"
       - name: Retain package evidence
