@@ -5,6 +5,7 @@ umask 077
 
 fail() {
     printf '%s\n' "$1" >&2
+    /usr/bin/logger -t SOFTTrackingPackage -- "$1"
     exit 1
 }
 
@@ -43,4 +44,9 @@ export SOFT_TRACKING_HEALTH="$userdir/setup-ready.json"
 executable="$userdir/SOFT-Tracking-Setup.app/Contents/MacOS/SOFT-Tracking-Setup"
 [[ -f "$executable" && -x "$executable" && ! -L "$executable" ]] || fail STP_E_LAYOUT
 # Stay attached to the native wrapper until the real installer window closes.
+# Give setup its own process group so launchd job removal cannot kill an agent
+# started by the final Install/Open action after setup has exited.
+set -m
+/usr/bin/logger -t SOFTTrackingPackage -- STP_GUI_START
 "$executable" --prepared-setup-launch || fail STP_E_SETUP
+/usr/bin/logger -t SOFTTrackingPackage -- STP_GUI_EXIT

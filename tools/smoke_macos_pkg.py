@@ -94,6 +94,9 @@ def check(package, evidence):
         installed = run('sudo', '-n', '/usr/sbin/installer', '-dumplog', '-verboseR', '-pkg', package, '-target', '/',
                         timeout=240, check=False)
         print(installed.stdout[-6000:] + installed.stderr[-6000:], flush=True)
+        install_log = run('sudo', '-n', 'cat', '/var/log/install.log', check=False)
+        print('\n'.join(line for line in install_log.stdout.splitlines()
+                        if any(term in line for term in ('STP_', 'postinstall', 'soft.tracking', 'SOFTTracking')))[-15000:], flush=True)
         if installed.returncode:
             raise AssertionError('Apple Installer package preparation failed')
         deadline = time.monotonic() + 90
@@ -109,8 +112,9 @@ def check(package, evidence):
             print('Prepared directories: ' + repr(sorted(map(str, owned))), flush=True)
             jobs = run('launchctl', 'list', check=False)
             print('\n'.join(line for line in jobs.stdout.splitlines() if 'soft.tracking' in line), flush=True)
-            install_log = run('sudo', '-n', 'tail', '-n', '400', '/var/log/install.log', check=False)
-            print(install_log.stdout[-25000:], flush=True)
+            launch_log = run('log', 'show', '--last', '5m', '--style', 'compact',
+                             '--predicate', 'eventMessage CONTAINS "STP_" OR eventMessage CONTAINS "com.soft.tracking.setup"', check=False)
+            print(launch_log.stdout[-15000:], flush=True)
             for path in owned:
                 for log in path.glob('*.log'):
                     print(log.read_text(errors='replace')[-4000:], flush=True)
@@ -127,6 +131,11 @@ def check(package, evidence):
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
         assert normal_ui, 'No normal installer UI under console user'
+        runners = [p for p in psutil.process_iter()
+                   if str(marker.parent / 'runner.sh') in p.cmdline()]
+        assert len(runners) == 1, 'Expected one package launch supervisor'
+        assert all(os.getpgid(p.pid) != os.getpgid(runners[0].pid) for p in normal_ui), \
+            'Setup must not share the temporary launchd job process group'
         run('screencapture', '-x', evidence / '02-key-entry.png')
         run('osascript', '-e', 'tell application id "com.soft.tracking.ui" to quit', timeout=30)
         deadline = time.monotonic() + 30

@@ -21,6 +21,7 @@ COMMANDS = {
     '/usr/bin/stat', '/usr/bin/id', '/bin/launchctl', '/usr/bin/sudo',
     '/usr/bin/mktemp', '/usr/bin/ditto', '/usr/sbin/chown', '/bin/chmod',
     '/usr/bin/codesign', '/usr/bin/xattr', '/usr/bin/getconf', '/bin/rm', '/bin/cp',
+    '/usr/bin/logger',
 }
 MOCK = r'''
 import json, os, secrets, shutil, stat, sys
@@ -90,7 +91,7 @@ elif cmd == 'rm':
         path.unlink()
     elif path.exists():
         shutil.rmtree(path)
-elif cmd not in ('chown', 'codesign', 'xattr'):
+elif cmd not in ('chown', 'codesign', 'xattr', 'logger'):
     sys.exit(23)
 '''
 NATIVE = r'''
@@ -102,6 +103,7 @@ def event(name):
     with (base / 'events.jsonl').open('a') as stream:
         stream.write(json.dumps({'cmd': name, 'args': sys.argv[1:],
             'role': os.environ.get('_PKG_TEST_ROLE'), 'tmpdir': os.environ.get('TMPDIR'),
+            'pgid': os.getpgrp(), 'parent_pgid': os.getpgid(os.getppid()),
             'health': os.environ.get('SOFT_TRACKING_HEALTH')}) + '\n')
 event('native-start')
 Path(os.environ['SOFT_TRACKING_HEALTH']).write_text(json.dumps({'ready': True, 'ui': 'electron'}))
@@ -329,7 +331,7 @@ class PackageScriptsTests(unittest.TestCase):
         for name in ('user-prepare', 'runner.sh'):
             self.copy_script(name, uid=0)
             self.assertEqual(self.run_script(name, 'x', 'y').stderr, 'STP_E_USER\n')
-        self.assertEqual(self.events(), [])
+        self.assertEqual([e for e in self.events() if e['cmd'] != 'logger'], [])
 
     def test_canonical_temp_path_and_real_gui_lifetime(self):
         alias = self.base / 'temp-alias'
@@ -353,6 +355,7 @@ class PackageScriptsTests(unittest.TestCase):
             self.assertEqual(start['role'], 'user')
             self.assertEqual(start['tmpdir'], str(self.user_temp) + '/')
             self.assertEqual(start['health'], str(marker))
+            self.assertNotEqual(start['pgid'], start['parent_pgid'])
         finally:
             (self.base / 'close-window').touch()
             stdout, stderr = process.communicate(timeout=15)
@@ -384,7 +387,7 @@ class PackageScriptsTests(unittest.TestCase):
     def test_runner_refuses_foreign_job_label(self):
         result = self.run_script('runner.sh', self.user_temp, 'com.other.job')
         self.assertEqual(result.stderr, 'STP_E_LABEL\n')
-        self.assertEqual(self.events(), [])
+        self.assertEqual([e for e in self.events() if e['cmd'] != 'logger'], [])
 
 
 if __name__ == '__main__':
