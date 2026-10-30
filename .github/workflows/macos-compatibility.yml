@@ -1,0 +1,67 @@
+name: Verify macOS ARM compatibility and installer branding
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compatibility:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            profile: legacy
+            ui: qt
+            floor: 11
+          - runner: macos-15
+            profile: modern
+            ui: electron
+            floor: 13
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      RELEASE_TARGET: macos-arm64-${{ matrix.profile }}
+      SOFT_TRACKING_UI: ${{ matrix.ui }}
+      PYTHONPATH: ${{ github.workspace }}/agent
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.10.11'
+          architecture: arm64
+      - run: python -m pip install -r agent/requirements-build.txt
+      - run: python tools/install_qt.py
+        if: matrix.ui == 'qt'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        if: matrix.ui == 'electron'
+        with:
+          node-version: '22'
+          architecture: arm64
+      - name: Package Electron
+        if: matrix.ui == 'electron'
+        run: |
+          npm ci --prefix desktop
+          npm run build --prefix desktop
+          npm run package --prefix desktop
+      - name: Build isolated compatibility candidate with disposable signing key
+        run: |
+          python tools/release.py keygen --key "$RUNNER_TEMP/compat.key" --key-id compatibility-test
+          python tools/release.py build --key "$RUNNER_TEMP/compat.key" --key-id compatibility-test --version 3.5.1-rc.1 --profile "${{ matrix.profile }}"
+      - name: Validate all embedded ARM runtime deployment targets
+        run: |
+          root=artifacts/$RELEASE_TARGET/3.5.1-rc.1
+          python tools/check_macos_floor.py --major "${{ matrix.floor }}" "$root/payload/app/soft-tracking-app" "$root/payload/app/soft-tracking-host-app" "$root/payload/launcher/soft-tracking" "$root/payload/launcher/soft-tracking-host" "$root/SOFT-Tracking-Setup.app/Contents/MacOS/SOFT-Tracking-Setup"
+      - name: Frozen installation and runtime health on available native runner
+        run: python tools/smoke_package.py artifacts/$RELEASE_TARGET/3.5.1-rc.1
+      - name: Remove disposable binaries and key
+        if: always()
+        run: |
+          for path in "$RUNNER_TEMP/compat.key" "$RUNNER_TEMP/compat.public.json" "artifacts/$RELEASE_TARGET" desktop/out; do
+            if [ -e "$path" ]; then rm -r -- "$path"; fi
+          done
+      - name: State verification boundary
+        if: always()
+        run: echo 'No release published. A binary deployment-target check is not a native macOS 11/12 runtime test. Gatekeeper trust is a separate requirement.' >> "$GITHUB_STEP_SUMMARY"

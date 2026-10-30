@@ -138,13 +138,17 @@ class MacOSSetupPayloadTests(unittest.TestCase):
         self.assertFalse(executable.call_args.kwargs['console'])
         self.assertFalse(executable.call_args.kwargs['upx'])
         self.assertEqual(bundle.call_args.kwargs['name'], 'SOFT-Tracking-Setup.app')
+        self.assertEqual(bundle.call_args.kwargs['bundle_identifier'], 'com.soft.tracking.setup')
+        self.assertTrue(bundle.call_args.kwargs['icon'].endswith('app_light.icns'))
+        self.assertEqual(bundle.call_args.kwargs['info_plist']['CFBundleDisplayName'], 'SOFT Tracking Setup')
+        self.assertEqual(bundle.call_args.kwargs['info_plist']['LSMinimumSystemVersion'], '13.0')
         self.assertEqual(hashlib.sha256(self.binary.read_bytes()).hexdigest(), before)
         self.assertEqual(self.binary.stat().st_mode, mode)
 
-    def test_only_posix_electron_installer_uses_opaque_spec(self):
+    def test_mac_installers_and_linux_electron_use_opaque_spec(self):
         for system, entry, ui, expected in [
             ('Darwin', 'setup_entry.py', 'electron', True),
-            ('Darwin', 'setup_entry.py', 'qt', False),
+            ('Darwin', 'setup_entry.py', 'qt', True),
             ('Darwin', 'runtime_entry.py', 'electron', False),
             ('Windows', 'setup_entry.py', 'electron', False),
             ('Linux', 'setup_entry.py', 'electron', True),
@@ -161,8 +165,11 @@ class MacOSSetupPayloadTests(unittest.TestCase):
             self.assertTrue(run.call_args.kwargs['check'])
             if expected:
                 source = Path(args[-1]).read_text(encoding='utf-8')
-                self.assertIn("'PySide2'", source)
-                self.assertIn("'_tkinter'", source)
+                if ui == 'electron':
+                    self.assertIn("'PySide2'", source)
+                    self.assertIn("'_tkinter'", source)
+                else:
+                    self.assertIn("'LSMinimumSystemVersion': '11.0'", source)
                 self.assertNotIn('--add-data', args)
 
     def test_linux_keeps_onefile_console_executable_without_app_bundle(self):

@@ -10,7 +10,7 @@ def requirement(target):
         return 'PySide2==5.15.2.1'
     if target == 'windows-arm64-modern':
         return 'PySide6-Essentials==6.10.2'
-    if target in ('linux-arm64-modern', 'macos-arm64-modern'):
+    if target in ('linux-arm64-modern', 'macos-arm64-modern', 'macos-arm64-legacy'):
         return 'PySide6-Essentials==6.7.3'
     return 'PySide6-Essentials==6.8.3'
 

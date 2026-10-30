@@ -71,6 +71,8 @@ def build_plan(args):
 def ui_for_profile(os_name, arch, profile):
     if profile == 'legacy' and os_name == 'windows' and arch in ('x86', 'x64'):
         expected = 'qt'
+    elif profile == 'legacy' and os_name == 'macos' and arch == 'arm64':
+        expected = 'qt'
     elif profile == 'modern' and os_name in ELECTRON_PLATFORMS and arch in ('x64', 'arm64'):
         expected = 'electron'
     else:
@@ -82,6 +84,9 @@ def ui_for_profile(os_name, arch, profile):
 
 def ui_compatibility(os_name, ui):
     if ui == 'qt':
+        if os_name == 'macos':
+            return {'ui': 'qt', 'profile': 'legacy', 'minimum_os_version': '11.0',
+                    'requires_compatibility_gate': True, 'requires_os_acceptance': True}
         return {'ui': 'qt', 'profile': 'legacy', 'requires_os_acceptance': True}
     requirements = {
         'windows': {'minimum_os_version': '10.0.18362'},
@@ -214,7 +219,7 @@ def keygen(path,key_id):
     atomic_json(path.with_suffix(".public.json"),{key_id:public})
 
 
-def setup_payload_spec(entry, name, data, excludes, *, macos):
+def setup_payload_spec(entry, name, data, excludes, *, macos, minimum_macos='13.0'):
     opaque = []
     destinations = set()
     for source, target in data:
@@ -247,7 +252,11 @@ def setup_payload_spec(entry, name, data, excludes, *, macos):
         '    strip=False, upx=False, console=' + repr(not macos) + ')',
     ]
     if macos:
-        lines.append('app = BUNDLE(exe, name=' + repr(name + '.app') + ', icon=None, bundle_identifier=None)')
+        info = {'CFBundleName': 'SOFT Tracking Setup', 'CFBundleDisplayName': 'SOFT Tracking Setup',
+                'LSMinimumSystemVersion': minimum_macos, 'NSHighResolutionCapable': True}
+        lines.append('app = BUNDLE(exe, name=' + repr(name + '.app') + ', icon=' +
+                     repr(str(ROOT / 'agent/agent_tracker/assets/app_light.icns')) +
+                     ", bundle_identifier='com.soft.tracking.setup', info_plist=" + repr(info) + ')')
     return '\n'.join(lines) + '\n'
 
 
@@ -267,12 +276,13 @@ def freeze(entry,name,dist,work,data=(),console=False,ui=None):
             args.extend(['--exclude-module', module])
     if ui == 'electron':
         args.extend(['--exclude-module', 'tkinter', '--exclude-module', '_tkinter'])
-    if platform.system() in ('Darwin', 'Linux') and entry == 'setup_entry.py' and ui == 'electron':
+    if entry == 'setup_entry.py' and (platform.system() == 'Darwin' or (platform.system() == 'Linux' and ui == 'electron')):
         excludes = [args[index + 1] for index, value in enumerate(args) if value == '--exclude-module']
         spec = work / (name + '.spec')
         work.mkdir(parents=True, exist_ok=True)
         spec.write_text(setup_payload_spec(entry, name, data, excludes,
-                                          macos=platform.system() == 'Darwin'), encoding='utf-8')
+                                          macos=platform.system() == 'Darwin',
+                                          minimum_macos='11.0' if ui == 'qt' else '13.0'), encoding='utf-8')
         subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm',
                         '--distpath', str(dist), '--workpath', str(work / name), str(spec)], check=True)
         return
@@ -334,9 +344,9 @@ def build(args):
         freeze(entry,Path(executable_name(native,True)).stem,payload / "launcher",work,console=native,ui=ui)
     if os_name == 'macos':
         if __package__:
-            from .macos_archive import verify_frozen
+            from .macos_archive import verify_frozen, verify_setup_branding
         else:
-            from macos_archive import verify_frozen
+            from macos_archive import verify_frozen, verify_setup_branding
         for executable in (payload/'app'/app_name, payload/'app'/executable_name(True),
                            payload/'launcher'/executable_name(False, True),
                            payload/'launcher'/executable_name(True, True)):
@@ -353,11 +363,6 @@ def build(args):
     if any(int(part)>65535 for part in parts[0].split('.')):raise ValueError('Browser version component exceeds 65535')
     manifest["version"]=parts[0]+'.'+str(fourth)
     manifest["version_name"]=args.version
-    if os_name=="macos" and args.profile=="legacy":
-        manifest["manifest_version"]=2
-        manifest["permissions"]=[p for p in manifest["permissions"] if p!='scripting']+manifest.pop("host_permissions")
-        manifest["browser_action"]=manifest.pop("action")
-        manifest["background"]={"scripts":["privacy.js","outbox.js","background.js"],"persistent":False}
     atomic_json(extension / "manifest.json",manifest)
     locale=manifest.get('default_locale')
     if not locale or not (extension / '_locales' / locale / 'messages.json').is_file():
@@ -407,6 +412,8 @@ def build(args):
                                                target=target, sha256=file_digest(migrator)))
     if os_name=="macos":
         bundle = out / 'SOFT-Tracking-Setup.app'
+        verify_setup_branding(bundle, ROOT / 'agent/agent_tracker/assets/app_light.icns',
+                              ui_compatibility(os_name, ui)['minimum_os_version'])
         verify_frozen(bundle / 'Contents/MacOS/SOFT-Tracking-Setup', bundle)
         installer=out / "SOFT-Tracking-Setup.dmg"
         create_macos_image(out / 'SOFT-Tracking-Setup.app', installer)

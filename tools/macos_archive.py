@@ -6,6 +6,20 @@ import subprocess
 from xml.parsers.expat import ExpatError
 
 
+def verify_setup_branding(bundle, icon, minimum):
+    metadata = plistlib.loads((bundle / 'Contents/Info.plist').read_bytes())
+    for field in ('CFBundleName', 'CFBundleDisplayName'):
+        if metadata.get(field) != 'SOFT Tracking Setup':
+            raise ValueError('Installer branding is missing: ' + field)
+    if metadata.get('CFBundleIdentifier') != 'com.soft.tracking.setup' or metadata.get('LSMinimumSystemVersion') != minimum:
+        raise ValueError('Installer identity or minimum macOS is incorrect')
+    name = metadata.get('CFBundleIconFile')
+    if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_.-]+\.icns', name):
+        raise ValueError('Installer icon is missing')
+    if (bundle / 'Contents/Resources' / name).read_bytes() != icon.read_bytes():
+        raise ValueError('Installer does not contain the SOFT Tracking icon')
+
+
 def verify_python_archive(executable):
     from PyInstaller.archive.readers import CArchiveReader
 

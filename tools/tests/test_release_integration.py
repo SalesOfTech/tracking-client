@@ -155,6 +155,14 @@ class ReleaseIntegrationTests(unittest.TestCase):
             with self.subTest(args=args), self.assertRaises(ValueError):
                 release.ui_for_profile(*args)
 
+    def test_mac_arm_compatibility_profile_keeps_an_explicit_big_sur_floor(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual('qt', release.ui_for_profile('macos', 'arm64', 'legacy'))
+        metadata = release.ui_compatibility('macos', 'qt')
+        self.assertEqual('11.0', metadata['minimum_os_version'])
+        self.assertTrue(metadata['requires_os_acceptance'])
+        self.assertTrue(metadata['requires_compatibility_gate'])
+
     def test_electron_freeze_excludes_qt_and_keeps_native_backend(self):
         for entry in ('runtime_entry.py','setup_entry.py','native_entry.py','bootstrap_entry.py'):
             with self.subTest(entry=entry), patch.object(release.platform, 'system', return_value='Windows'), patch.object(release.subprocess, 'run') as run:
