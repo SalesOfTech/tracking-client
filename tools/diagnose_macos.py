@@ -17,6 +17,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = 'macos-arm64-modern'
 PINS = {
+    '3.4.1': '36c4cd96bda94b3da7a9954983521b1428207ae4ac78136eeda99cd3307085a8',
     '3.4.2': 'af7fa96621d586ab80f0af68afa6ed8904b1054d5d737d0bc057b23f1062aaa0',
     '3.5.0': '5553576a2ede5d85126aeb3f459f315d48d782b62532d933c3a7c9549cb58526',
     '3.5.1': '02af4290d51dfd25f6e9c605216830baa1a1d691999e39869fbcc328cca8e361',
