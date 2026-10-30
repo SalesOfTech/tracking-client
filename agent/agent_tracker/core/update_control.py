@@ -11,6 +11,19 @@ REQUEST_TIMEOUT = 120
 STATES = {'active', 'installed', 'checking', 'registration', 'downloading', 'rolled_back', 'error'}
 
 
+def validate_update_diagnostic(value):
+    stages = {'check', 'download', 'stage', 'stop', 'activate', 'health', 'health_timeout',
+              'health_exit', 'health_receipt', 'confirm', 'recovery', 'launch'}
+    if not isinstance(value, dict) or set(value) != {'update_stage', 'target_version', 'attempt', 'retry_at'}:
+        raise ValueError('Invalid update diagnostic')
+    if value['update_stage'] not in stages or not isinstance(value['target_version'], str) or not re.fullmatch(
+            r'(?:unknown|\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?)', value['target_version']) or len(value['target_version']) > 64:
+        raise ValueError('Invalid update diagnostic')
+    if type(value['attempt']) is not int or not 0 <= value['attempt'] <= 32 or type(value['retry_at']) is not int or not 0 <= value['retry_at'] <= 4102444800:
+        raise ValueError('Invalid update diagnostic')
+    return dict(value)
+
+
 def _read(path):
     try:
         value = read_json(path, {})

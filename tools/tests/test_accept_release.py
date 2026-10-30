@@ -250,6 +250,31 @@ class GateTests(unittest.TestCase):
             api.asset.assert_called_with(123, destination, 'a' * 64, 1234)
             delegated.assert_not_called()
 
+    def test_current_release_requires_350_and_automatic_supervisor_acceptance(self):
+        with patch.object(gate, 'VERSION', '3.5.1'):
+            versions = gate.upgrade_baselines(gate.VERSION)
+            self.assertEqual(len(versions), 8)
+            self.assertEqual(versions[0], '3.5.0')
+            self.assertEqual(gate.baseline_urls(json.dumps(self.urls())), self.urls())
+            with patch.object(gate, 'read_plan', return_value=self.plan), \
+                    patch.object(gate, 'row_for_target', return_value=gate.TARGETS[0]), \
+                    patch.object(gate, 'check_native'), \
+                    patch.object(gate, 'private_root', return_value=self.root), \
+                    patch.object(gate.subprocess, 'run') as run, redirect_stdout(io.StringIO()):
+                gate.test()
+            self.assertEqual(run.call_count, 9)
+            automatic = [call for call in run.call_args_list if 'smoke_auto_update.py' in call.args[0][1]]
+            self.assertEqual(len(automatic), 1)
+            self.assertEqual(automatic[0].args[0][2], str(self.root / '3.5.0'))
+            self.assertTrue(automatic[0].kwargs['check'])
+
+    def test_automatic_failure_exposes_only_known_stage(self):
+        path = self.root / 'private.log'
+        path.write_text('FAIL: automatic-update stage=automatic-transition exception=RuntimeError\n')
+        self.assertEqual(gate.automatic_failure_stage(path), 'automatic-transition')
+        path.write_text('FAIL: automatic-update stage=private-secret exception=RuntimeError\n')
+        self.assertEqual(gate.automatic_failure_stage(path), 'subprocess-failure')
+
     def test_public_metadata_mismatch_never_downloads_or_falls_back(self):
         target = gate.TARGETS[0]['target']
         metadata = dict(id=123, name=f'SOFT-Tracking-{target}-3.4.2.zip',

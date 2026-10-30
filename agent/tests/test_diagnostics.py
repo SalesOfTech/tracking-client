@@ -2,12 +2,57 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from agent_tracker.core.client import Client
 from test_client import FakeHttp
 
 
 class DiagnosticsTests(unittest.TestCase):
+    def test_update_report_survives_restart_and_uploads_when_activity_fails(self):
+        with tempfile.TemporaryDirectory() as folder:
+            http = FakeHttp()
+            client = Client(Path(folder), http)
+            http.device = client.device['device_id']
+            client.enroll('a' * 32, 'b' * 64)
+            details = dict(update_stage='health', target_version='3.5.1', attempt=1, retry_at=1800000000)
+            code = client.report_diagnostic('update', ValueError('secret-key private-path'), update=details)
+            self.assertEqual(code, client.report_diagnostic('update', update=details))
+            client.close()
+            client = Client(Path(folder), http)
+            self.addCleanup(client.close)
+            event = client._queue(client.profiles.active(), diagnostic=True).batch()[0]
+            self.assertEqual('health', event['update_stage'])
+            self.assertNotIn('secret', json.dumps(event))
+            client.outbox.push_payload(dict(event_id='a' * 32, type='session', timestamp=1700000000))
+            post = http.post_json
+            def send(path, payload, **kwargs):
+                if payload['events'][0]['type'] != 'diagnostic':
+                    raise ConnectionError('activity failure')
+                return post(path, payload, **kwargs)
+            with patch.object(http, 'post_json', side_effect=send):
+                with self.assertRaises(ConnectionError):
+                    client.flush()
+            self.assertEqual([], client._queue(client.profiles.active(), diagnostic=True).batch())
+            self.assertEqual(1, client.queue_counts()['pending'])
+            client.close()
+
+    def test_update_report_allowlist_and_short_deduplication_window(self):
+        with tempfile.TemporaryDirectory() as folder:
+            client = Client(Path(folder))
+            self.addCleanup(client.close)
+            details = dict(update_stage='download', target_version='3.5.1', attempt=0, retry_at=1800000000)
+            with patch('time.time', return_value=1700000000):
+                first = client.report_diagnostic('update', update=details)
+                self.assertEqual(first, client.report_diagnostic('update', update=details))
+            with patch('time.time', return_value=1700000300):
+                self.assertNotEqual(first, client.report_diagnostic('update', update=details))
+            for fields in ({'update_stage': 'secret'}, {'target_version': 'https://secret'},
+                           {'attempt': True}, {'retry_at': -1}, {'message': 'private'}):
+                with self.assertRaises(ValueError):
+                    client.report_diagnostic('update', update=dict(details, **fields))
+            client.close()
+
     def test_offline_diagnostic_survives_restart_and_requires_acknowledgement(self):
         with tempfile.TemporaryDirectory() as folder:
             http = FakeHttp()

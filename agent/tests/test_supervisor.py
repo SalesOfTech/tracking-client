@@ -23,6 +23,114 @@ def retained_320_launcher(root, call):
 
 
 class SupervisorTests(unittest.TestCase):
+    def setUp(self):
+        for name in ('report_failure', 'flush_reports'):
+            patched = patch.object(supervisor, name)
+            setattr(self, name, patched.start())
+            self.addCleanup(patched.stop)
+
+    def test_update_error_is_reported_without_leaking_message_into_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'install'
+            root.mkdir()
+            manager = Mock()
+            manager.active.return_value = {'version': '3.5.0'}
+            manager.session.headers = {}
+            error = ValueError('https://private/path?secret=credential')
+            manager.check.side_effect = error
+            state = Mock()
+            state.get.return_value = {'device_secret': 'fixture'}
+            child = Mock(returncode=0)
+            child.poll.side_effect = [None, None, 0]
+            self.report_failure.return_value = 'ST-ABCDEF123456'
+            with patch.object(supervisor, 'ReleaseManager', return_value=manager), \
+                    patch.object(supervisor, 'ClientState', return_value=state), \
+                    patch.object(supervisor.subprocess, 'Popen', return_value=child), \
+                    patch.object(supervisor.time, 'sleep'):
+                self.assertEqual(0, supervisor.main(root))
+            self.report_failure.assert_called_once_with(root, 'check', 'unknown', error)
+            status = read_json(root / 'update-status.json')
+            self.assertEqual('error', status['state'])
+            self.assertEqual('ST-ABCDEF123456', status['code'])
+            self.assertNotIn('secret', str(status))
+            self.assertGreaterEqual(self.flush_reports.call_count, 2)
+
+    def test_health_failure_rolls_back_reports_and_schedules_retry(self):
+        for exit_code, expected_stage in ((1, 'health_exit'), (0, 'health_receipt')):
+            with self.subTest(exit_code=exit_code), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / 'install'
+                root.mkdir()
+                manager = Mock()
+                manager.active.return_value = {'version': '3.5.0'}
+                manager.session.headers = {}
+                manager.check.return_value = {'version': '3.5.1'}
+                manager.rollback.side_effect = lambda: atomic_json(root / 'failed.json',
+                    dict(version='3.5.1', attempts=1, retry_at=1900))
+                state = Mock()
+                state.get.return_value = {'device_secret': 'fixture'}
+                child = Mock(returncode=0)
+                child.poll.return_value = None
+                candidate = Mock(returncode=exit_code)
+                candidate.poll.return_value = exit_code
+                self.report_failure.reset_mock()
+                self.report_failure.return_value = 'ST-ABCDEF123456'
+                with patch.object(supervisor, 'ReleaseManager', return_value=manager), \
+                        patch.object(supervisor, 'ClientState', return_value=state), \
+                        patch.object(supervisor.subprocess, 'Popen', side_effect=[child, candidate]), \
+                        patch.object(supervisor.time, 'time', return_value=1000), \
+                        patch.object(supervisor.time, 'sleep'):
+                    self.assertEqual(75, supervisor.main(root))
+                manager.rollback.assert_called_once()
+                manager.confirm.assert_not_called()
+                self.assertEqual((root, expected_stage, '3.5.1'), self.report_failure.call_args.args[:3])
+                self.assertEqual(1900, read_json(root / 'update-status.json')['retry_at'])
+                manager.discard_stage.assert_called_once()
+
+    def test_interrupted_update_reports_recovery_before_starting_old_runtime(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'install'
+            root.mkdir()
+            atomic_json(root / 'pending.json', {'version': '3.5.1'})
+            manager = Mock()
+            manager.active.return_value = {'version': '3.5.0'}
+            manager.session.headers = {}
+            state = Mock()
+            state.get.return_value = {'device_secret': 'fixture'}
+            child = Mock(returncode=0)
+            child.poll.return_value = 0
+            with patch.object(supervisor, 'ReleaseManager', return_value=manager), \
+                    patch.object(supervisor, 'ClientState', return_value=state), \
+                    patch.object(supervisor.subprocess, 'Popen', return_value=child):
+                self.assertEqual(0, supervisor.main(root))
+            manager.rollback.assert_called_once()
+            self.report_failure.assert_called_once_with(root, 'recovery', '3.5.1')
+            self.flush_reports.assert_called_once_with(root)
+
+    def test_retry_deadline_is_checked_before_the_normal_hourly_interval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'install'
+            root.mkdir()
+            atomic_json(root / 'failed.json', dict(version='3.5.1', attempts=1, retry_at=1900))
+            manager = Mock()
+            manager.active.return_value = {'version': '3.5.0'}
+            manager.session.headers = {}
+            manager.check.return_value = None
+            state = Mock()
+            state.get.return_value = {'device_secret': 'fixture'}
+            child = Mock(returncode=0)
+            child.poll.side_effect = [None, None, None, 0]
+            ticks = iter([0, 899, 900])
+            now = [0]
+            def tick(_): now[0] = next(ticks)
+            with patch.object(supervisor, 'ReleaseManager', return_value=manager), \
+                    patch.object(supervisor, 'ClientState', return_value=state), \
+                    patch.object(supervisor.subprocess, 'Popen', return_value=child), \
+                    patch.object(supervisor.time, 'time', side_effect=lambda: 1000 + now[0]), \
+                    patch.object(supervisor.time, 'monotonic', side_effect=lambda: now[0]), \
+                    patch.object(supervisor.time, 'sleep', side_effect=tick):
+                self.assertEqual(0, supervisor.main(root))
+            self.assertEqual(2, manager.check.call_count)
+
     def test_manual_request_bypasses_hourly_interval_without_spawning_another_updater(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

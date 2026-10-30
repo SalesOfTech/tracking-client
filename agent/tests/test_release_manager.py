@@ -9,7 +9,7 @@ import time
 import unittest
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from nacl.signing import SigningKey
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -115,6 +115,187 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual('3.0.0',manager.active()['version'])
         self.assertEqual('3.0.0',read_json(self.root/'extension/manifest.json')['version'])
         self.assertEqual('3.0.1',read_json(self.root/'failed.json')['version'])
+
+    def test_rollbacks_retry_with_persistent_capped_backoff_and_confirm_clears_it(self):
+        archive, manifest, envelope = self.package()
+        class Session:
+            def get(self, url, **kwargs): return Response(json.dumps(envelope).encode())
+        now = int(time.time())
+        for attempt, delay in enumerate((900, 3600, 14400, 86400, 86400), 1):
+            with patch('agent_tracker.core.release_manager.time.time', return_value=now):
+                manager = ReleaseManager(self.root, Session())
+                manager.activate(manager.stage(archive, manifest))
+                manager.rollback()
+                failure = read_json(self.root / 'failed.json')
+                self.assertEqual(attempt, failure['attempts'])
+                self.assertEqual(now + delay, failure['retry_at'])
+                self.assertIsNone(ReleaseManager(self.root, Session()).check())
+            now += delay
+            # Refresh the signed manifest as a release server does after its expiry.
+            manifest['expires_at'] = now + 3600
+            encoded = json.dumps(manifest).encode()
+            envelope = {'key_id': 'test', 'payload': base64.b64encode(encoded).decode(),
+                        'signature': base64.b64encode(self.key.sign(encoded).signature).decode()}
+            with patch('time.time', return_value=now):
+                self.assertEqual('3.0.1', ReleaseManager(self.root, Session()).check()['version'])
+        manager.activate(manager.stage(archive, manifest))
+        manager.confirm()
+        self.assertFalse((self.root / 'failed.json').exists())
+
+    def test_legacy_failed_marker_retries_and_new_version_is_not_blocked(self):
+        _, _, envelope = self.package()
+        class Session:
+            def get(self, url, **kwargs): return Response(json.dumps(envelope).encode())
+        atomic_json(self.root / 'failed.json', {'version': '3.0.1', 'time': int(time.time())})
+        self.assertEqual('3.0.1', ReleaseManager(self.root, Session()).check()['version'])
+        atomic_json(self.root / 'failed.json', {'version': '3.0.1', 'retry_at': int(time.time()) + 86400, 'attempts': 4})
+        _, _, envelope = self.package('3.0.2')
+        self.assertEqual('3.0.2', ReleaseManager(self.root, Session()).check()['version'])
+
+    def test_repeated_failed_attempts_do_not_accumulate_known_artifacts(self):
+        archive, manifest, _ = self.package()
+        manager = ReleaseManager(self.root)
+        unrelated = [self.root / 'orphaned' / ('3.0.1-' + 'a' * 32),
+                     self.root / ('extension-failed-' + 'b' * 32)]
+        for path in unrelated:
+            path.mkdir(parents=True)
+            (path / 'sentinel').write_text('untracked')
+        with patch.object(manager, '_failed_artifact_in_use', return_value=False):
+            for attempt in range(5):
+                manager.activate(manager.stage(archive, manifest))
+                manager.rollback()
+                self.assertEqual(attempt + 1, read_json(self.root / 'failed.json')['attempts'])
+                self.assertEqual([], read_json(self.root / 'failed-artifacts.json'))
+                self.assertEqual([unrelated[0]], list((self.root / 'orphaned').iterdir()))
+                self.assertEqual([unrelated[1]], list(self.root.glob('extension-failed-*')))
+                self.assertTrue((self.root / 'versions/3.0.1/app' / executable_name()).is_file())
+        self.assertEqual('3.0.0', manager.active()['version'])
+        for path in unrelated:
+            self.assertEqual('untracked', (path / 'sentinel').read_text())
+
+    def failed_artifact(self, manager, version='3.0.1', identifier='a'):
+        path = self.root / 'orphaned' / (version + '-' + identifier * 32)
+        path.mkdir(parents=True)
+        (path / 'sentinel').write_text('failed attempt')
+        manager._remember_failed_artifact(path, version)
+        return path
+
+    def test_failed_cleanup_protects_current_last_good_previous_and_pending(self):
+        manager = ReleaseManager(self.root)
+        protected = [self.failed_artifact(manager, version)
+                     for version in ('3.0.0', '2.9.0', '2.8.0')]
+        disposable = self.failed_artifact(manager)
+        atomic_json(self.root / 'last-good.json', dict(version='2.9.0', previous_version='2.8.0'))
+        atomic_json(self.root / 'pending.json', dict(version='3.0.1', previous={'version': '3.0.0'}))
+        with patch.object(manager, '_failed_artifact_in_use', return_value=False):
+            manager._cleanup_failed_artifacts()
+            self.assertTrue(disposable.is_dir())
+            (self.root / 'pending.json').unlink()
+            manager._cleanup_failed_artifacts()
+        self.assertFalse(disposable.exists())
+        self.assertTrue(all(path.is_dir() for path in protected))
+        self.assertEqual(3, len(read_json(self.root / 'failed-artifacts.json')))
+
+    def test_busy_and_locked_failed_artifacts_are_retried_without_blocking_updates(self):
+        archive, manifest, _ = self.package()
+        manager = ReleaseManager(self.root)
+        with patch.object(manager, '_failed_artifact_in_use', return_value=True):
+            manager.activate(manager.stage(archive, manifest))
+            manager.rollback()
+            manager.activate(manager.stage(archive, manifest))
+            manager.rollback()
+        entries = read_json(self.root / 'failed-artifacts.json')
+        self.assertEqual(3, len(entries))
+        with patch.object(manager, '_failed_artifact_in_use', return_value=False), \
+                patch('agent_tracker.core.release_manager.shutil.rmtree', side_effect=PermissionError('locked')):
+            manager.activate(manager.stage(archive, manifest))
+            manager.rollback()
+        self.assertEqual('3.0.0', manager.active()['version'])
+        self.assertEqual(5, len(read_json(self.root / 'failed-artifacts.json')))
+        with patch.object(manager, '_failed_artifact_in_use', return_value=False):
+            manager._cleanup_failed_artifacts()
+        self.assertEqual([], read_json(self.root / 'failed-artifacts.json'))
+        self.assertEqual([], list((self.root / 'orphaned').iterdir()))
+        self.assertEqual([], list(self.root.glob('extension-failed-*')))
+
+    def test_cleanup_rejects_unrelated_paths_and_redirected_artifacts(self):
+        manager = ReleaseManager(self.root)
+        artifact = self.failed_artifact(manager)
+        artifact.rename(self.root / 'must-retain')
+        try:
+            artifact.symlink_to(self.root / 'must-retain', target_is_directory=True)
+        except OSError:
+            self.skipTest('Directory symlinks unavailable')
+        entries = read_json(self.root / 'failed-artifacts.json')
+        entries += [{'path': path, 'version': '3.0.1'} for path in
+                    ('versions/3.0.0', '../must-retain', 'extension', 'orphaned/unrelated')]
+        atomic_json(self.root / 'failed-artifacts.json', entries)
+        with patch.object(manager, '_failed_artifact_in_use', return_value=False):
+            manager._cleanup_failed_artifacts()
+        self.assertEqual(entries, read_json(self.root / 'failed-artifacts.json'))
+        self.assertTrue(artifact.is_symlink())
+        self.assertTrue((self.root / 'must-retain/sentinel').is_file())
+        self.assertTrue((self.root / 'versions/3.0.0/build.json').is_file())
+        self.assertTrue((self.root / 'extension/manifest.json').is_file())
+
+    def test_cleanup_does_not_follow_redirected_orphan_parent(self):
+        manager = ReleaseManager(self.root)
+        artifact = self.failed_artifact(manager)
+        outside = Path(self.tmp.name) / 'outside'
+        artifact.parent.rename(outside)
+        try:
+            artifact.parent.symlink_to(outside, target_is_directory=True)
+        except OSError:
+            self.skipTest('Directory symlinks unavailable')
+        with patch.object(manager, '_failed_artifact_in_use', return_value=False):
+            manager._cleanup_failed_artifacts()
+        self.assertTrue((outside / artifact.name / 'sentinel').is_file())
+
+    def test_cleanup_preserves_artifact_referenced_by_a_protected_version_link(self):
+        manager = ReleaseManager(self.root)
+        artifact = self.failed_artifact(manager)
+        try:
+            (self.root / 'versions/2.9.0').symlink_to(artifact, target_is_directory=True)
+        except OSError:
+            self.skipTest('Directory symlinks unavailable')
+        atomic_json(self.root / 'last-good.json', {'version': '2.9.0'})
+        with patch.object(manager, '_failed_artifact_in_use', return_value=False):
+            manager._cleanup_failed_artifacts()
+        self.assertTrue((artifact / 'sentinel').is_file())
+        self.assertEqual(1, len(read_json(self.root / 'failed-artifacts.json')))
+
+    def test_failed_cleanup_process_guard_checks_renamed_payload_and_command(self):
+        import psutil
+        manager = ReleaseManager(self.root)
+        artifact = self.failed_artifact(manager)
+        process = Mock(pid=123)
+        process.username.return_value = 'fixture-owner'
+        with patch.object(psutil, 'Process', return_value=process), \
+                patch.object(psutil, 'process_iter', return_value=[process]):
+            for executable in (artifact / 'app/runtime', self.root / 'versions/3.0.1/app/runtime'):
+                process.exe.return_value = str(executable)
+                process.cmdline.return_value = []
+                self.assertTrue(manager._failed_artifact_in_use(artifact, '3.0.1'))
+            process.exe.return_value = '/usr/bin/python'
+            process.cmdline.return_value = ['python', str(artifact / 'worker.py')]
+            self.assertTrue(manager._failed_artifact_in_use(artifact, '3.0.1'))
+            process.cmdline.return_value = ['python', '/unrelated/worker.py']
+            self.assertFalse(manager._failed_artifact_in_use(artifact, '3.0.1'))
+            process.exe.side_effect = psutil.AccessDenied(123)
+            self.assertTrue(manager._failed_artifact_in_use(artifact, '3.0.1'))
+
+    def test_unrecorded_orphan_is_not_claimed_without_a_matching_failure(self):
+        archive, manifest, _ = self.package()
+        manager = ReleaseManager(self.root)
+        manager.activate(manager.stage(archive, manifest))
+        with patch.object(manager, '_failed_artifact_in_use', return_value=False):
+            manager.rollback()
+            (self.root / 'failed.json').unlink()
+            manager.activate(manager.stage(archive, manifest))
+            manager.rollback()
+        self.assertEqual(1, len(list((self.root / 'orphaned').iterdir())))
+        self.assertEqual([], read_json(self.root / 'failed-artifacts.json'))
+
     def test_permission_escalation_rejected(self):
         archive,manifest,_=self.package(permissions=['storage','debugger'])
         with self.assertRaises(ValueError):ReleaseManager(self.root).stage(archive,manifest)

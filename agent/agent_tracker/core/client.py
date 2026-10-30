@@ -234,18 +234,23 @@ class Client:
             try:
                 with self._lock:
                     delivered += self._flush_profile(profile)
-                    try:
-                        self._flush_profile(profile, diagnostic=True)
-                    except Exception:
-                        # Support uploads must not block employee activity or switching.
-                        pass
             except Exception as error:
                 # One revoked or offline employee must not starve other profiles.
                 if failure is None:
                     failure = error
+        self.flush_diagnostics()
         if failure is not None:
             raise failure
         return delivered
+
+    def flush_diagnostics(self):
+        # A broken activity batch must not starve support reports (or vice versa).
+        for profile in self.profiles.delivery_profiles():
+            try:
+                with self._lock:
+                    self._flush_profile(profile, diagnostic=True)
+            except Exception:
+                pass
 
     def _flush_profile(self, profile, diagnostic=False):
         outbox = self._queue(profile, diagnostic=diagnostic)
@@ -281,14 +286,21 @@ class Client:
                 counts[key] += value
         return counts
 
-    def report_diagnostic(self, category, error=None):
+    def report_diagnostic(self, category, error=None, update=None):
         """Queue bounded, credential-free support data with the original employee."""
-        if category not in ('connection', 'delivery', 'collector', 'activation', 'desktop', 'legacy_cleanup'):
+        if category not in ('connection', 'delivery', 'collector', 'activation', 'desktop', 'legacy_cleanup', 'update'):
             raise ValueError('Invalid diagnostic category')
+        details = {}
+        if category == 'update':
+            from .update_control import validate_update_diagnostic
+            details = validate_update_diagnostic(update)
+        elif update is not None:
+            raise ValueError('Unexpected update diagnostic')
         with self._lock, self.state.lock:
             previous = self.state.get('diagnostic_' + category, {})
             now = int(time.time())
-            if previous.get('epoch') == self.employee_epoch and now - previous.get('timestamp', 0) < 3600:
+            interval = 300 if category == 'update' else 3600
+            if previous.get('epoch') == self.employee_epoch and previous.get('update', {}) == details and now - previous.get('timestamp', 0) < interval:
                 return previous['code']
             identifier = uuid.uuid4().hex
             code = 'ST-' + identifier[:12].upper()
@@ -303,8 +315,8 @@ class Client:
                 http_status = 0
             self._queue(self.profiles.active(), diagnostic=True).push_payload({'event_id': identifier, 'type': 'diagnostic', 'timestamp': now,
                 'code': code, 'category': category, 'exception': name, 'http_status': http_status,
-                'version': application_version(), 'os': {'Windows': 'windows', 'Darwin': 'macos', 'Linux': 'linux'}.get(platform.system(), 'unknown')})
-            self.state.set('diagnostic_' + category, {'code': code, 'timestamp': now, 'epoch': self.employee_epoch})
+                'version': application_version(), 'os': {'Windows': 'windows', 'Darwin': 'macos', 'Linux': 'linux'}.get(platform.system(), 'unknown'), **details})
+            self.state.set('diagnostic_' + category, {'code': code, 'timestamp': now, 'epoch': self.employee_epoch, 'update': details})
             return code
 
     def retry_rejected(self):

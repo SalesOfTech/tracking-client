@@ -35,7 +35,7 @@ ENVIRONMENT = 'tracking-release-acceptance'
 SMOKE_STEP = 'All genuine published upgrades with all existing smoke assertions'
 MAX_BUNDLE = 2 * 1024 ** 3 - 1
 ASSET_HOST = 'release-assets.githubusercontent.com'
-PUBLIC_BASELINES = frozenset({'3.4.2', '3.4.0', '3.3.2', '3.3.0', '3.2.0'})
+PUBLIC_BASELINES = frozenset({'3.5.0', '3.4.2', '3.4.0', '3.3.2', '3.3.0', '3.2.0'})
 STAGE = 'preflight'
 
 
@@ -522,6 +522,39 @@ def test():
             STAGE += '-process-timeout'
             raise
         print(row['target'] + ' ' + old + ' PASS', flush=True)
+        if old == '3.5.0':
+            STAGE = 'automatic-update-' + old
+            path = root / (old + '.automatic.private.log')
+            try:
+                with path.open('wb') as log:
+                    subprocess.run([sys.executable, str(ROOT / 'tools/smoke_auto_update.py'),
+                                    str(root / old), str(root / 'current')], env=env, cwd=root,
+                                   stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                                   timeout=900, check=True)
+            except subprocess.CalledProcessError:
+                STAGE += '-' + automatic_failure_stage(path)
+                raise
+            except subprocess.TimeoutExpired:
+                STAGE += '-process-timeout'
+                raise
+            print(row['target'] + ' ' + old + ' automatic supervisor update PASS', flush=True)
+
+
+def automatic_failure_stage(path):
+    stages = {'prepare', 'local-tls', 'old-launcher-start', 'old-runtime-ready',
+              'automatic-catalog-fetch', 'automatic-archive-fetch', 'automatic-transition',
+              'new-runtime-health', 'new-runtime-config', 'automatic-fetch-evidence',
+              'graceful-shutdown', 'process-cleanup', 'data-preservation'}
+    try:
+        with Path(path).open('rb') as log:
+            log.seek(max(0, log.seek(0, os.SEEK_END) - 4096))
+            for line in reversed(log.read(4096).decode('utf-8', errors='replace').splitlines()):
+                match = re.fullmatch(r'FAIL: automatic-update stage=([a-z-]+) exception=[A-Za-z]+', line)
+                if match and match[1] in stages:
+                    return match[1]
+    except OSError:
+        pass
+    return 'subprocess-failure'
 
 
 def accepted_jobs(api, plan):

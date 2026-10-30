@@ -82,6 +82,29 @@ Keep local identities, queues, generated binaries and credentials out of commits
 Private browser extension installation may require an explicit browser confirmation.
 Source availability does not disable OS permissions or device/company revocation.
 
+### Update Recovery Diagnostics
+
+Rollback records a persistent retry deadline: 15 minutes, one hour, four hours,
+then once per day for repeated failures of the same version. A newer offered
+version is not delayed by an older failure; successful confirmation clears the
+failure record. Historical `failed.json` records without a deadline no longer
+permanently blacklist an update. Manual checks still respect rollback cooldown.
+
+The first upgrade from an older client still runs that client's updater. A failed
+3.5.0 marker does not block the distinct 3.5.1 release, but retry and diagnostic
+improvements cannot repair an older executable that cannot start at all. Stable
+acceptance includes the genuine 3.5.0 frozen supervisor fetching and installing
+the signed candidate through an isolated HTTPS fixture, without a new installer.
+
+The supervisor queues credential-free `diagnostic` events with category `update`,
+the failed stage, installed/target versions, exception class, HTTP status, attempt
+count and retry deadline. Diagnostic delivery uses device authentication and
+durable acknowledgements independently of activity delivery, including while the
+GUI is stopped. Raw exception messages and subprocess output are not uploaded.
+Deploy backend support for this category before distributing the new client.
+Previously installed supervisors do not acquire these changes until upgraded;
+this does not repair an old updater that cannot start or has blocked this release.
+
 ## Optional Extended Activity
 
 Version 3.5.0 understands the server policy `extended_activity: true`. This is
