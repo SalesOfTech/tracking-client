@@ -51,7 +51,8 @@ def check(image):
                             '0083;69000000;Chrome;00000000-0000-0000-0000-000000000001', str(app)], check=True)
             subprocess.run(['xattr', '-r', '-w', 'com.apple.quarantine',
                             '0083;69000000;Chrome;00000000-0000-0000-0000-000000000001', str(engine)], check=True)
-            declined = run_frozen(['/bin/bash', str(script), '--health-check'], input=b'n\n', timeout=30)
+            declined = run_frozen(['/bin/bash', str(script), '--health-check'], input=b'n\n',
+                                  env=dict(os.environ), timeout=30)
             assert declined.returncode != 0
             subprocess.run(['xattr', '-p', 'com.apple.quarantine', str(engine)], check=True, stdout=subprocess.DEVNULL)
             health = root/'consented-health.json'
