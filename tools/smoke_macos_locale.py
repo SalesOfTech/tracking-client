@@ -121,7 +121,12 @@ def validate(result, executable, engine, uid, case):
     assert Path(result['process_executable']).resolve() == engine.resolve(), 'Different frozen engine'
     root = Path(result['frozen_root']).resolve()
     assert engine.parent.parent.resolve() in root.parents, 'Imports outside the sealed engine'
-    assert root in Path(result['i18n_file']).resolve().parents, 'Locale module loaded outside frozen bundle'
+    # PyInstaller relocates data-bearing package directories to Resources and
+    # links them from Frameworks; a module's virtual __file__ can resolve there.
+    contents = engine.parent.parent.resolve()
+    module = Path(result['i18n_file']).resolve()
+    assert any(folder.resolve() in module.parents for folder in (contents / 'Frameworks', contents / 'Resources')), \
+        'Locale module loaded outside frozen bundle'
     tags = result['native_tags']
     if not tags or tags[0] != tag or result['native_region'] != country:
         raise ArgumentPreferencesUnavailable(

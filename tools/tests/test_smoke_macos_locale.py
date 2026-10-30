@@ -113,6 +113,9 @@ class LocaleRunnerTests(unittest.TestCase):
     def test_all_languages_validate_actual_cf_and_identity(self):
         for case in smoke.CASES:
             smoke.validate(report(self.wrapper, self.engine, case), self.wrapper, self.engine, 501, case)
+        relocated = dict(report(self.wrapper, self.engine),
+                         i18n_file=str(self.engine.parent.parent / 'Resources/agent_tracker/i18n.py'))
+        smoke.validate(relocated, self.wrapper, self.engine, 501, smoke.CASES[0])
         original = report(self.wrapper, self.engine)
         for key, value in [('frozen', False), ('uid', 0), ('euid', 0), ('executable', '/other'),
                            ('process_executable', '/python'), ('frozen_root', '/source'),
