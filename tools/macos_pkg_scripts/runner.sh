@@ -48,5 +48,14 @@ executable="$userdir/SOFT-Tracking-Setup.app/Contents/MacOS/SOFT-Tracking-Setup"
 # started by the final Install/Open action after setup has exited.
 set -m
 /usr/bin/logger -t SOFTTrackingPackage -- STP_GUI_START
-"$executable" --prepared-setup-launch || fail STP_E_SETUP
+"$executable" --prepared-setup-launch 2> "$userdir/native.log"
+native_status=$?
+if (( native_status != 0 )); then
+    /usr/bin/logger -t SOFTTrackingPackage -- "STP_NATIVE_EXIT_$native_status"
+    # Startup diagnostics contain no entered key: forward them only before ready.
+    if [[ ! -f "$userdir/setup-ready.json" ]]; then
+        /usr/bin/tail -c 4096 "$userdir/native.log" | /usr/bin/logger -t SOFTTrackingPackage
+    fi
+    fail STP_E_SETUP
+fi
 /usr/bin/logger -t SOFTTrackingPackage -- STP_GUI_EXIT

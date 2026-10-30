@@ -96,12 +96,14 @@ def check(package, evidence):
         print(installed.stdout[-6000:] + installed.stderr[-6000:], flush=True)
         install_log = run('sudo', '-n', 'cat', '/var/log/install.log', check=False)
         print('\n'.join(line for line in install_log.stdout.splitlines()
-                        if any(term in line for term in ('STP_', 'postinstall', 'soft.tracking', 'SOFTTracking')))[-15000:], flush=True)
+                        if any(term in line for term in ('STP_', 'soft.tracking', 'SOFTTracking')))[-15000:], flush=True)
         if installed.returncode:
             raise AssertionError('Apple Installer package preparation failed')
         deadline = time.monotonic() + 90
         while time.monotonic() < deadline:
             owned = set(temp.glob('SOFTTrackingGUI.*')) - before
+            if not owned:
+                break
             markers = [path / 'setup-ready.json' for path in owned if (path / 'setup-ready.json').is_file()]
             if len(markers) == 1:
                 marker = markers[0]
@@ -113,7 +115,7 @@ def check(package, evidence):
             jobs = run('launchctl', 'list', check=False)
             print('\n'.join(line for line in jobs.stdout.splitlines() if 'soft.tracking' in line), flush=True)
             launch_log = run('log', 'show', '--last', '5m', '--style', 'compact',
-                             '--predicate', 'eventMessage CONTAINS "STP_" OR eventMessage CONTAINS "com.soft.tracking.setup"', check=False)
+                             '--predicate', 'process == "logger" OR eventMessage CONTAINS "STP_"', check=False)
             print(launch_log.stdout[-15000:], flush=True)
             for path in owned:
                 for log in path.glob('*.log'):
