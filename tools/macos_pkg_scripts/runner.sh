@@ -43,4 +43,4 @@ export SOFT_TRACKING_HEALTH="$userdir/setup-ready.json"
 executable="$userdir/SOFT-Tracking-Setup.app/Contents/MacOS/SOFT-Tracking-Setup"
 [[ -f "$executable" && -x "$executable" && ! -L "$executable" ]] || fail STP_E_LAYOUT
 # Stay attached to the native wrapper until the real installer window closes.
-"$executable" --prepared-setup-launch >/dev/null 2>&1 || fail STP_E_SETUP
+"$executable" --prepared-setup-launch || fail STP_E_SETUP

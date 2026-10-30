@@ -105,6 +105,12 @@ def check(package, evidence):
                 break
             time.sleep(0.5)
         if marker is None:
+            run('screencapture', '-x', evidence / '03-launch-failure.png', check=False)
+            print('Prepared directories: ' + repr(sorted(map(str, owned))), flush=True)
+            jobs = run('launchctl', 'list', check=False)
+            print('\n'.join(line for line in jobs.stdout.splitlines() if 'soft.tracking' in line), flush=True)
+            install_log = run('sudo', '-n', 'tail', '-n', '400', '/var/log/install.log', check=False)
+            print(install_log.stdout[-25000:], flush=True)
             for path in owned:
                 for log in path.glob('*.log'):
                     print(log.read_text(errors='replace')[-4000:], flush=True)

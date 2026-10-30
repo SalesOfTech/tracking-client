@@ -71,7 +71,7 @@ userdir=$(as_user /bin/bash "$rootstage/user-prepare" \
 [[ $(/usr/bin/id -u "$console_user" 2>/dev/null) == "$console_uid" ]] || fail STP_E_CONSOLE_CHANGED
 /bin/launchctl print "gui/$console_uid" >/dev/null 2>&1 || fail STP_E_CONSOLE_CHANGED
 label="com.soft.tracking.setup.$console_uid.${rootstage##*.}"
-as_user /bin/launchctl submit -l "$label" -- /bin/bash "$userdir/runner.sh" "$userdir" "$label" \
+as_user /bin/launchctl submit -l "$label" -o "$userdir/launch.log" -e "$userdir/launch.log" -- /bin/bash "$userdir/runner.sh" "$userdir" "$label" \
     >/dev/null 2>&1 || fail STP_E_SUBMIT
 submitted=1
 printf '%s\n' STP_OK_SUBMITTED
