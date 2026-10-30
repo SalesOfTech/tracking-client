@@ -49,3 +49,28 @@ class MacOSEngineTests(unittest.TestCase):
         with patch.object(sys, 'platform', 'win32'), patch.object(sys, '_MEIPASS', '/frozen', create=True), \
                 patch.dict(os.environ, SOFT_TRACKING_SETUP_PAYLOAD='/untrusted'):
             self.assertEqual(setup_payload(), Path('/frozen/setup-payload'))
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX parent path aliases')
+    def test_native_payload_accepts_parent_alias_but_not_different_bundle_or_leaf_link(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            contents = root / 'real/Setup.app/Contents'
+            payload = contents / 'Resources/setup-payload'
+            payload.mkdir(parents=True)
+            alias = root / 'alias'
+            alias.symlink_to(root / 'real', target_is_directory=True)
+            external = alias / 'Setup.app/Contents/Resources/setup-payload'
+            with patch.object(sys, 'platform', 'darwin'), \
+                    patch.object(sys, 'executable', str(contents / 'MacOS/SOFT-Tracking-Setup')), \
+                    patch.dict(os.environ, SOFT_TRACKING_SETUP_PAYLOAD=str(external)):
+                self.assertEqual(setup_payload(), payload)
+                other = root / 'Other.app/Contents/Resources/setup-payload'
+                other.mkdir(parents=True)
+                with patch.dict(os.environ, SOFT_TRACKING_SETUP_PAYLOAD=str(other)):
+                    with self.assertRaises(ValueError):
+                        setup_payload()
+                leaf = root / 'linked-payload'
+                leaf.symlink_to(payload, target_is_directory=True)
+                with patch.dict(os.environ, SOFT_TRACKING_SETUP_PAYLOAD=str(leaf)):
+                    with self.assertRaises(ValueError):
+                        setup_payload()

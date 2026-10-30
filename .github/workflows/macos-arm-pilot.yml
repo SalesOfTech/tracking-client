@@ -12,7 +12,7 @@ concurrency:
   group: macos-arm-pilot
   cancel-in-progress: false
 env:
-  RELEASE_VERSION: 3.5.2-rc.2
+  RELEASE_VERSION: 3.5.2-rc.3
   RELEASE_TARGET: macos-arm64-modern
   RELEASE_PROFILE: modern
   SOFT_TRACKING_UI: electron
@@ -60,6 +60,18 @@ jobs:
         run: python tools/ci.py cleanup-key
       - name: Native acceptance on build OS
         run: python tools/smoke_macos_pilot.py "artifacts/$RELEASE_TARGET/$RELEASE_VERSION/SOFT-Tracking-Setup.dmg"
+      - name: Build single PKG from this exact verified application
+        run: python tools/macos_pkg.py "$RUNNER_TEMP/package" --image "artifacts/$RELEASE_TARGET/$RELEASE_VERSION/SOFT-Tracking-Setup.dmg"
+      - name: Normal package GUI acceptance
+        run: python tools/smoke_macos_pkg.py "$RUNNER_TEMP/package/SOFT-Tracking-Setup-ARM.pkg" "$RUNNER_TEMP/evidence"
+      - name: Retain package evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: arm-package-build-evidence
+          path: ${{ runner.temp }}/evidence
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Store exact pilot DMG in draft (not latest)
         id: upload
         env:
@@ -70,6 +82,7 @@ jobs:
           image="artifacts/$RELEASE_TARGET/$RELEASE_VERSION/SOFT-Tracking-Setup.dmg"
           (cd "$(dirname "$image")" && shasum -a 256 SOFT-Tracking-Setup.dmg > SOFT-Tracking-Setup.dmg.sha256)
           gh release upload "$tag" "$image" "$image.sha256"
+          gh release upload "$tag" "$RUNNER_TEMP/package/SOFT-Tracking-Setup-ARM.pkg" "$RUNNER_TEMP/package/SOFT-Tracking-Setup-ARM.pkg.sha256"
           printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
   verify:
     needs: build
@@ -99,7 +112,7 @@ jobs:
           python - <<'PY'
           import json, os, re, subprocess
           tag = os.environ['PILOT_TAG']
-          match = re.fullmatch(r'macos-arm-pilot-3\.5\.2-rc\.2-(\d+)-(\d+)', tag)
+          match = re.fullmatch(r'macos-arm-pilot-3\.5\.2-rc\.3-(\d+)-(\d+)', tag)
           assert match, 'Not an ARM pilot tag'
           def api(path):
               return json.loads(subprocess.check_output(['gh', 'api', 'repos/' + os.environ['GITHUB_REPOSITORY'] + path]))
@@ -111,12 +124,24 @@ jobs:
           assert run['head_sha'] == release['target_commitish'], 'Pilot source mismatch'
           jobs = api('/actions/runs/' + match[1] + '/attempts/' + match[2] + '/jobs')['jobs']
           assert any(job['name'] == 'build' and job['conclusion'] == 'success' for job in jobs), 'Native build acceptance did not pass'
-          assert {item['name'] for item in release['assets']} == {'SOFT-Tracking-Setup.dmg', 'SOFT-Tracking-Setup.dmg.sha256'}
+          assert {item['name'] for item in release['assets']} == {'SOFT-Tracking-Setup.dmg', 'SOFT-Tracking-Setup.dmg.sha256', 'SOFT-Tracking-Setup-ARM.pkg', 'SOFT-Tracking-Setup-ARM.pkg.sha256'}
           PY
           gh release download "$PILOT_TAG" --dir "$RUNNER_TEMP/pilot" --pattern 'SOFT-Tracking-Setup.dmg*'
+          gh release download "$PILOT_TAG" --dir "$RUNNER_TEMP/pilot" --pattern 'SOFT-Tracking-Setup-ARM.pkg*'
           (cd "$RUNNER_TEMP/pilot" && shasum -a 256 -c SOFT-Tracking-Setup.dmg.sha256)
+          (cd "$RUNNER_TEMP/pilot" && shasum -a 256 -c SOFT-Tracking-Setup-ARM.pkg.sha256)
       - name: Native installed runtime and administrator fallback acceptance
         run: python tools/smoke_macos_pilot.py "$RUNNER_TEMP/pilot/SOFT-Tracking-Setup.dmg"
+      - name: Normal package GUI acceptance
+        run: python tools/smoke_macos_pkg.py "$RUNNER_TEMP/pilot/SOFT-Tracking-Setup-ARM.pkg" "$RUNNER_TEMP/evidence"
+      - name: Retain package evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: arm-package-${{ matrix.runner }}-evidence
+          path: ${{ runner.temp }}/evidence
+          retention-days: 7
+          if-no-files-found: ignore
   publish-pilot:
     needs: [build, verify]
     if: always() && github.ref == 'refs/heads/main' && needs.verify.result == 'success'
@@ -130,4 +155,4 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PILOT_TAG: ${{ inputs.existing_pilot || needs.build.outputs.tag }}
         run: |
-          gh release edit "$PILOT_TAG" --draft=false --prerelease --latest=false --notes "ARM-only installation pilot 3.5.2-rc.2. Graphical setup preparation replaces the normal Terminal workflow; enter the employee key and complete installation. Exact DMG passed native installed runtime, native messaging, mounted setup, GUI preparation cold/warm cache and explicit administrator trust fallback checks on GitHub macOS 14/15/26 ARM runners. Physical M1 full installation, Finder/Gatekeeper consent interaction and next-release live update testing remain pending. Requires macOS 13+. Not Apple-notarized: Open Anyway may be required. Windows/Linux/Intel, stable release, widget and production update feed are unchanged."
+          gh release edit "$PILOT_TAG" --draft=false --prerelease --latest=false --notes "ARM-only 3.5.2-rc.3. Use SOFT-Tracking-Setup-ARM.pkg: open in Apple Installer, authorize preparation, then enter the employee key in SOFT Tracking and click Install. No Terminal commands required. Exact package passed normal GUI readiness, console-user execution and cleanup on macOS 14/15/26 ARM CI; the bundled runtime passed isolated install, startup and native messaging tests. Physical M1 installation, automated Gatekeeper consent and next-release live auto-update remain unverified. Requires macOS 13+. Not notarized: Open Anyway may be required. Stable release, widget, production feeds and other platforms unchanged."

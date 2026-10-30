@@ -78,7 +78,7 @@ def instructions(resources):
             (folder / name).write_bytes(ET.tostring(page, encoding='utf-8', method='html'))
 
 
-def build(output):
+def build(output, source_image=None):
     from release import require_github_runner
     require_github_runner()
     if platform.system() != 'Darwin' or platform.machine() != 'arm64':
@@ -87,18 +87,24 @@ def build(output):
     with tempfile.TemporaryDirectory(prefix='soft-pkg-build-') as temporary:
         work = Path(temporary)
         image = work / 'source.dmg'
-        url = 'https://github.com/SalesOfTech/tracking-client/releases/download/' + SOURCE_TAG + '/SOFT-Tracking-Setup.dmg'
-        digest = hashlib.sha256()
-        total = 0
-        with urllib.request.urlopen(url, timeout=60) as response, image.open('xb') as stream:
-            for block in iter(lambda: response.read(1024 * 1024), b''):
-                total += len(block)
-                if total > 512 * 1024 * 1024:
-                    raise ValueError('Oversized source image')
-                digest.update(block)
-                stream.write(block)
-        if digest.hexdigest() != SOURCE_SHA256:
-            raise ValueError('Pinned source image digest mismatch')
+        if source_image is not None:
+            source_image = Path(source_image)
+            if not source_image.is_file() or source_image.is_symlink():
+                raise ValueError('Expected a locally built disk image')
+            shutil.copyfile(source_image, image)
+        else:
+            url = 'https://github.com/SalesOfTech/tracking-client/releases/download/' + SOURCE_TAG + '/SOFT-Tracking-Setup.dmg'
+            digest = hashlib.sha256()
+            total = 0
+            with urllib.request.urlopen(url, timeout=60) as response, image.open('xb') as stream:
+                for block in iter(lambda: response.read(1024 * 1024), b''):
+                    total += len(block)
+                    if total > 512 * 1024 * 1024:
+                        raise ValueError('Oversized source image')
+                    digest.update(block)
+                    stream.write(block)
+            if digest.hexdigest() != SOURCE_SHA256:
+                raise ValueError('Pinned source image digest mismatch')
         mount = work / 'mount'
         mount.mkdir()
         run('hdiutil', 'attach', '-readonly', '-nobrowse', '-mountpoint', mount, image)
@@ -132,4 +138,6 @@ def build(output):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path)
-    build(parser.parse_args().output.resolve())
+    parser.add_argument('--image', type=Path, help='Use the verified DMG built in this same ARM workflow')
+    args = parser.parse_args()
+    build(args.output.resolve(), args.image)
