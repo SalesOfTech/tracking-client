@@ -1,0 +1,54 @@
+name: Resume accepted stable publication
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Accepted stable version
+        required: true
+        type: string
+      acceptance_run:
+        description: Completed acceptance run with every native job successful
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+  deployments: read
+
+concurrency:
+  group: stable-client-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    environment: tracking-release-acceptance
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      ACCEPTANCE_VERSION: ${{ inputs.version }}
+      ACCEPTED_RUN_ID: ${{ inputs.acceptance_run }}
+      TRACKING_TRUSTED_UPDATE_KEYS: ${{ vars.TRACKING_TRUSTED_UPDATE_KEYS }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.10.19'
+      - run: python -m pip install requests==2.32.5 PyNaCl==1.6.2 packaging==24.2
+      - name: Revalidate completed native acceptance and publish exact bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tools/publish_accepted.py
+      - name: Publish byte-identical runtime delivery
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DELIVERY_VERSION: ${{ inputs.version }}
+        run: python tools/delivery.py
+      - name: Remove temporary verification downloads
+        if: always()
+        run: python tools/publish_accepted.py cleanup

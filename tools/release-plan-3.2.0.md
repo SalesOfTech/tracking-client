@@ -8,6 +8,12 @@ stable workflow `version` input (`ACCEPTANCE_VERSION`), including `3.5.0`.
 
 ## Operator Contract
 
+If every native acceptance job passed but publication failed, dispatch
+`publish-accepted.yml` with the stable version and completed acceptance run ID.
+It revalidates the protected dispatch, original plan, trusted keys, source ancestry,
+all native results and exact candidate before resuming uploads. It does not build
+or rerun native tests. Missing/failed/skipped native results are not accepted.
+
 - Finish all eight candidate build jobs successfully with the selected payload version.
 - Commit the acceptance harness separately; rebuilding the candidate is unnecessary.
 - Dispatch `accept-release.yml` from `main` with the matching `version` and

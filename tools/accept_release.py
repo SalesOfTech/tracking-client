@@ -218,16 +218,16 @@ def checkout_sha(path):
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True).stdout.strip()
 
 
-def hosted_context():
+def hosted_context(workflow='accept-release.yml'):
     require(os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted')
     require(os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch' and os.environ.get('GITHUB_REF') == 'refs/heads/main')
     require(os.environ.get('GITHUB_SERVER_URL') == 'https://github.com')
-    require(os.environ.get('GITHUB_WORKFLOW_REF') == os.environ['GITHUB_REPOSITORY'] + '/.github/workflows/accept-release.yml@refs/heads/main')
+    require(os.environ.get('GITHUB_WORKFLOW_REF') == os.environ['GITHUB_REPOSITORY'] + '/.github/workflows/' + workflow + '@refs/heads/main')
     require(checkout_sha(ROOT) == os.environ['GITHUB_SHA'])
     require(sys.flags.optimize == 0)
 
 
-def authorize_dispatch(api):
+def authorize_dispatch(api, workflow='accept-release.yml'):
     for actor in {os.environ['GITHUB_ACTOR'], os.environ.get('GITHUB_TRIGGERING_ACTOR', os.environ['GITHUB_ACTOR'])}:
         require(re.fullmatch('[A-Za-z0-9-]+', actor))
         permission = api.api('collaborators/' + actor + '/permission')
@@ -243,7 +243,7 @@ def authorize_dispatch(api):
     # We never write environment settings or treat an input boolean as approval.
     run = api.api('actions/runs/' + os.environ['GITHUB_RUN_ID'])
     require(run.get('head_sha') == os.environ['GITHUB_SHA'] and run.get('head_branch') == 'main')
-    require(run.get('event') == 'workflow_dispatch' and run.get('path') == '.github/workflows/accept-release.yml')
+    require(run.get('event') == 'workflow_dispatch' and run.get('path') == '.github/workflows/' + workflow)
     require(run.get('run_attempt') == int(os.environ['GITHUB_RUN_ATTEMPT']))
     require(run.get('head_repository', {}).get('full_name') == api.repo)
     require(run.get('actor', {}).get('login') == os.environ['GITHUB_ACTOR'])
@@ -708,16 +708,28 @@ def promote():
     STAGE = 'promotion'
     plan, api = read_plan(), GitHub()
     authorize_dispatch(api)
+    publish_verified(api, plan)
+
+
+def publish_verified(api, plan, allow_published=False):
+    global STAGE
+    STAGE = 'accepted-jobs'
     accepted_jobs(api, plan)
+    STAGE = 'candidate-revalidation'
     revalidate(api, plan)
+    STAGE = 'stable-metadata'
     tag = api.api('git/ref/tags/v' + VERSION, absent=True)
     release = stable_release(api)
     if tag is not None:
         matching_stable_tag(tag, plan)
     if release is not None:
-        require(tag is not None and release.get('draft') is True and release.get('tag_name') == 'v' + VERSION)
+        require(tag is not None and release.get('tag_name') == 'v' + VERSION)
+        require(release.get('draft') is True or (allow_published and release.get('prerelease') is False))
     root = private_root()
     root.mkdir(mode=0o700)
+    if release is not None and release.get('draft') is False:
+        verify_remote_assets(api, release, plan, root)
+        return
     coverage = ('All eight native targets passed. macOS 3.5.2 is a fresh PKG installation baseline; '
                 'cold PKG and installed-runtime checks passed on Intel and ARM, including macOS 15 and 26 ARM. '
                 'The update from macOS 3.5.2 to the next release will be tested separately. '
@@ -741,6 +753,7 @@ def promote():
                           'prerelease': False, 'make_latest': 'false'})
     release_id = release['id']
     for row in TARGETS:
+        STAGE = 'publish-' + row['target']
         name = 'SOFT-Tracking-' + row['target'] + '-' + VERSION + '.zip'
         for filename in (name, name + '.sha256'):
             asset = plan['assets'][filename]
@@ -752,12 +765,14 @@ def promote():
                 api.upload(release_id, root / filename)
             (root / filename).unlink()
     revalidate(api, plan)
+    STAGE = 'uploaded-byte-verification'
     remote = api.api('releases/' + str(release_id))
     require(remote['draft'] is True and remote['tag_name'] == 'v' + VERSION)
     # Verify actual uploaded bytes, not only the API-reported digest.
     verify_remote_assets(api, remote, plan, root)
     tag = api.api('git/ref/tags/v' + VERSION)
     matching_stable_tag(tag, plan)
+    STAGE = 'publish-stable'
     published = api.api('releases/' + str(release_id), 'PATCH', {'draft': False, 'prerelease': False,
                         'make_latest': 'false', 'name': 'SOFT Tracking ' + VERSION, 'body': body})
     require(published['draft'] is False and published['prerelease'] is False)
