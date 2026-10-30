@@ -62,10 +62,14 @@ def build_plan(args):
                 or int(args.version.rsplit('.', 1)[1]) > 9999):
             raise ValueError('Local test builds require a bounded prerelease version')
     target = os_name + '-' + arch + '-' + args.profile
+    pilot = os.environ.get('SOFT_TRACKING_MACOS_PILOT') == '1'
+    if pilot and (target != 'macos-arm64-modern' or '-rc.' not in args.version):
+        raise ValueError('Native macOS pilot requires an ARM modern prerelease')
     root = ROOT / 'artifacts' / 'local-test' if local_test else ROOT / 'artifacts'
     return dict(os=os_name, architecture=arch, target=target, ui=ui_for_profile(os_name, arch, args.profile),
                 local_test=local_test, output=root / target / args.version,
-                metadata={'build_channel': 'local-test'} if local_test else {})
+                metadata=({'build_channel': 'macos-arm-pilot', 'macos_engine': 'sealed-onedir-v1'} if pilot
+                          else {'build_channel': 'local-test'} if local_test else {}))
 
 
 def ui_for_profile(os_name, arch, profile):
@@ -334,15 +338,24 @@ def build(args):
     payload=out / "payload"; (payload / "app").mkdir(parents=True)
     (payload / "launcher").mkdir()
     app_name = Path(executable_name()).stem
-    freeze('runtime_entry.py', app_name, out/'runtime-dist', work,
-           [(ROOT/'agent/agent_tracker/assets','agent_tracker/assets')], ui=ui)
-    copy_runtime(out/'runtime-dist', payload/'app', app_name, os_name)
+    pilot = plan['metadata'].get('macos_engine') == 'sealed-onedir-v1'
+    if pilot:
+        if __package__:
+            from .macos_pilot import build_engine, build_setup
+        else:
+            from macos_pilot import build_engine, build_setup
+        engine_archive, native_wrapper = build_engine(out, work, payload)
+    else:
+        freeze('runtime_entry.py', app_name, out/'runtime-dist', work,
+               [(ROOT/'agent/agent_tracker/assets','agent_tracker/assets')], ui=ui)
+        copy_runtime(out/'runtime-dist', payload/'app', app_name, os_name)
     if desktop:
         copy_electron(desktop, payload/'app/electron')
-    freeze('native_entry.py', Path(executable_name(True)).stem, payload/'app', work, console=True, ui=ui)
-    for native,entry in [(False,"bootstrap_entry.py"),(True,"bootstrap_native_entry.py")]:
-        freeze(entry,Path(executable_name(native,True)).stem,payload / "launcher",work,console=native,ui=ui)
-    if os_name == 'macos':
+    if not pilot:
+        freeze('native_entry.py', Path(executable_name(True)).stem, payload/'app', work, console=True, ui=ui)
+        for native,entry in [(False,"bootstrap_entry.py"),(True,"bootstrap_native_entry.py")]:
+            freeze(entry,Path(executable_name(native,True)).stem,payload / "launcher",work,console=native,ui=ui)
+    if os_name == 'macos' and not pilot:
         if __package__:
             from .macos_archive import verify_frozen, verify_setup_branding
         else:
@@ -403,7 +416,10 @@ def build(args):
     atomic_json(setup / "manifest.json",envelope)
     atomic_json(setup / "trusted-update-keys.json",{args.key_id:public})
     atomic_json(setup / "setup-build.json",metadata)
-    freeze("setup_entry.py","SOFT-Tracking-Setup",out,work,[(setup,"setup-payload")],ui=ui)
+    if pilot:
+        image_source = build_setup(out, setup, engine_archive, native_wrapper, args.version)
+    else:
+        freeze("setup_entry.py","SOFT-Tracking-Setup",out,work,[(setup,"setup-payload")],ui=ui)
     if os_name == 'windows':
         freeze('migrate_legacy_entry.py', 'SOFT-Tracking-Migrate', out, work,
                [(setup, 'setup-payload')], console=True, ui=ui)
@@ -412,11 +428,17 @@ def build(args):
                                                target=target, sha256=file_digest(migrator)))
     if os_name=="macos":
         bundle = out / 'SOFT-Tracking-Setup.app'
+        if pilot:
+            if __package__:
+                from .macos_archive import verify_setup_branding
+            else:
+                from macos_archive import verify_setup_branding
         verify_setup_branding(bundle, ROOT / 'agent/agent_tracker/assets/app_light.icns',
                               ui_compatibility(os_name, ui)['minimum_os_version'])
-        verify_frozen(bundle / 'Contents/MacOS/SOFT-Tracking-Setup', bundle)
+        if not pilot:
+            verify_frozen(bundle / 'Contents/MacOS/SOFT-Tracking-Setup', bundle)
         installer=out / "SOFT-Tracking-Setup.dmg"
-        create_macos_image(out / 'SOFT-Tracking-Setup.app', installer)
+        create_macos_image(image_source if pilot else bundle, installer)
     elif os_name=="windows": installer=out / "SOFT-Tracking-Setup.exe"
     else:
         installer=out / "SOFT-Tracking-Setup.run"

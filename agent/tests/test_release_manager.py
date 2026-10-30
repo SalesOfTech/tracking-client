@@ -3,14 +3,18 @@ import hashlib
 import io
 import json
 import os
+import stat
 import sys
 import tempfile
 import time
 import unittest
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from nacl.signing import SigningKey
+# Load the host backend before tests temporarily simulate macOS through sys.platform.
+import psutil
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from agent_tracker.core.files import atomic_json,read_json
@@ -55,7 +59,7 @@ class ReleaseTests(unittest.TestCase):
         atomic_json(self.root/'extension/manifest.json',self.extension)
         (self.root/'outbox-sentinel').write_text('must survive')
     def tearDown(self): self.tmp.cleanup()
-    def package(self,version='3.0.1',permissions=None):
+    def package(self,version='3.0.1',permissions=None,engine=None):
         build=dict(self.old,version=version)
         archive=Path(self.tmp.name).resolve()/('release-'+version+'.zip')
         extension=dict(self.extension,version=version)
@@ -65,7 +69,13 @@ class ReleaseTests(unittest.TestCase):
             package.writestr('extension/manifest.json',json.dumps(extension))
             for native in (False,True):
                 package.writestr('app/'+executable_name(native),b'executable fixture')
-                package.writestr('launcher/'+executable_name(native,True),b'launcher fixture')
+                entry = zipfile.ZipInfo('launcher/' + executable_name(native, True))
+                entry.external_attr = (stat.S_IFREG | 0o755) << 16
+                package.writestr(entry, b'launcher fixture' + (hashlib.sha256(engine).digest() if engine is not None else b''))
+            if engine is not None:
+                name = 'engine-' + hashlib.sha256(engine).hexdigest() + '.zip'
+                for folder in ('app', 'launcher'):
+                    package.writestr(folder + '/' + name, engine)
         raw=archive.read_bytes()
         manifest=dict(build,protocol=3,expires_at=int(time.time())+3600,sha256=hashlib.sha256(raw).hexdigest(),size=len(raw),url='https://tracking.salesoftech.com/test.zip')
         encoded=json.dumps(manifest).encode()
@@ -340,8 +350,8 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual('3.0.0', manager.active()['version'])
         self.assertEqual('must survive', (root / 'outbox-sentinel').read_text())
 
-    def installer_fixture(self):
-        archive,manifest,envelope=self.package()
+    def installer_fixture(self, engine=None):
+        archive,manifest,envelope=self.package(engine=engine)
         bundle=Path(self.tmp.name).resolve()/'setup';bundle.mkdir()
         (bundle/'release.zip').write_bytes(archive.read_bytes())
         atomic_json(bundle/'manifest.json',envelope)
@@ -350,6 +360,110 @@ class ReleaseTests(unittest.TestCase):
         root=Path(self.tmp.name).resolve()/'new-install'
         install(bundle,root,'a'*32,integrate=False)
         return bundle, root
+
+    def test_macos_engine_bootstraps_install_and_repair_archives_before_wrappers(self):
+        from agent_tracker import installer
+        engine = b'new-layout engine fixture'
+        archive_name = 'engine-' + hashlib.sha256(engine).hexdigest() + '.zip'
+        replacements = []
+        replace = os.replace
+        def record(source, destination):
+            source, destination = Path(source), Path(destination)
+            if source.parent.name.startswith('.bootstrap-'):
+                replacements.append(destination.name)
+                if destination.name != archive_name:
+                    self.assertEqual((destination.parent / archive_name).read_bytes(), engine)
+            return replace(source, destination)
+        with patch.object(installer.sys, 'platform', 'darwin'), patch.object(installer.os, 'replace', side_effect=record):
+            bundle, root = self.installer_fixture(engine=engine)
+            wrappers = [executable_name(native, True) for native in (False, True)]
+            self.assertEqual(replacements, [archive_name, *wrappers])
+            for name in wrappers:
+                self.assertEqual(stat.S_IMODE((root / name).stat().st_mode), 0o700)
+            before = (root / 'current.json').read_bytes(), (root / 'enrollment.json').read_bytes()
+            originals = {name: (root / name).read_bytes() for name in wrappers}
+            (root / archive_name).unlink()
+            for name in wrappers:
+                (root / name).write_bytes(b'damaged wrapper')
+            replacements.clear()
+            with patch.object(installer, 'stopped_supervisor') as stop, SingleInstance(root / 'supervisor.lock'):
+                install(bundle, root, 'a'*32, integrate=False)
+            stop.assert_not_called()
+        self.assertEqual(replacements, [archive_name, *wrappers])
+        self.assertEqual(originals, {name: (root / name).read_bytes() for name in wrappers})
+        self.assertEqual(before, ((root / 'current.json').read_bytes(), (root / 'enrollment.json').read_bytes()))
+        self.assertEqual(list(root.glob('.bootstrap-*')), [])
+
+    def test_macos_bootstrap_copy_failure_leaves_existing_files_and_no_temporary_files(self):
+        from agent_tracker import installer
+        with patch.object(installer.sys, 'platform', 'darwin'):
+            _, root = self.installer_fixture(engine=b'engine fixture')
+            release = root / 'versions/3.0.1'
+            before = {path.name: path.read_bytes() for path in root.iterdir() if path.is_file()}
+            copy = installer.shutil.copy2
+            def fail(source, destination):
+                if source.name == executable_name(True, True):
+                    raise OSError('copy failed')
+                return copy(source, destination)
+            with patch.object(installer.shutil, 'copy2', side_effect=fail), self.assertRaisesRegex(OSError, 'copy failed'):
+                installer.copy_bootstrap_files(release, root, refresh=True)
+        self.assertEqual(before, {path.name: path.read_bytes() for path in root.iterdir() if path.is_file()})
+        self.assertEqual(list(root.glob('.bootstrap-*')), [])
+
+    def test_macos_manual_engine_upgrade_promotes_bootstrap_only_after_health(self):
+        from agent_tracker import installer
+        with patch.object(installer.sys, 'platform', 'darwin'):
+            bundle, root = self.installer_fixture(engine=b'first engine fixture')
+            wrappers = [executable_name(native, True) for native in (False, True)]
+            before = {name: (root / name).read_bytes() for name in wrappers}
+            engine = b'future engine fixture'
+            archive_name = 'engine-' + hashlib.sha256(engine).hexdigest() + '.zip'
+            archive, _, envelope = self.package('3.0.2', engine=engine)
+            (bundle / 'release.zip').write_bytes(archive.read_bytes())
+            atomic_json(bundle / 'manifest.json', envelope)
+            def check(root, version):
+                self.assertEqual(version, '3.0.2')
+                self.assertEqual(before, {name: (root / name).read_bytes() for name in wrappers})
+                self.assertFalse((root / archive_name).exists())
+            def fail(root, version):
+                check(root, version)
+                raise ValueError('health failed')
+            with self.assertRaisesRegex(InstallerError, 'setup_upgrade_failed'):
+                install(bundle, root, 'a'*32, integrate=False, health_check=fail)
+            self.assertEqual(read_json(root / 'current.json')['version'], '3.0.1')
+            self.assertEqual(before, {name: (root / name).read_bytes() for name in wrappers})
+            self.assertFalse((root / archive_name).exists())
+            install(bundle, root, 'a'*32, integrate=False, health_check=check)
+        self.assertEqual(read_json(root / 'current.json')['version'], '3.0.2')
+        self.assertEqual((root / archive_name).read_bytes(), engine)
+        for name in wrappers:
+            self.assertEqual((root / name).read_bytes(), (root / 'versions/3.0.2/launcher' / name).read_bytes())
+            self.assertNotEqual((root / name).read_bytes(), before[name])
+
+    def test_engine_sidecars_do_not_change_non_macos_bootstrap_behavior(self):
+        from agent_tracker import installer
+        for system in ('linux', 'win32'):
+            with self.subTest(system=system), patch.object(installer.sys, 'platform', system):
+                source = self.root / 'fixture' / system
+                source.mkdir(parents=True)
+                with patch.object(installer.shutil, 'copy2') as copy:
+                    installer.copy_bootstrap_files(source, self.root)
+                    self.assertEqual(copy.call_count, 2)
+                    copy.reset_mock()
+                    installer.copy_bootstrap_files(source, self.root, refresh=True)
+                    copy.assert_not_called()
+
+    def test_legacy_installer_main_uses_shared_setup_payload_lookup(self):
+        from agent_tracker import installer
+        payload = Path(self.tmp.name) / 'explicit-setup-payload'
+        helper = Mock(return_value=payload)
+        with patch.dict(sys.modules, {'agent_tracker.setup_payload': SimpleNamespace(setup_payload=helper)}), \
+                patch.object(installer, 'bootstrap_code', return_value='a'*32), \
+                patch.object(installer, 'InstallerWindow') as window:
+            self.assertEqual(installer.main(), 0)
+        helper.assert_called_once_with()
+        window.assert_called_once_with(payload, 'a'*32, auto_migrate=True)
+        window.return_value.root.mainloop.assert_called_once_with()
 
     def test_install_profile_and_wrong_company_reinstall(self):
         bundle,root=self.installer_fixture()

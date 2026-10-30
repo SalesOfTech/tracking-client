@@ -26,6 +26,8 @@ def smoke_macos_uninstall(app, metadata, version, env):
     result = run_frozen([str(app), '--uninstall-self-test'], env=env, timeout=60)
     if result.returncode:
         raise RuntimeError('Frozen isolated macOS uninstall smoke failed: ' + result.stderr.decode(errors='replace')[-8000:])
+    if metadata.get('macos_engine') == 'sealed-onedir-v1':
+        return
     # Also exercise the live bootloader-parent exemption with an independent
     # onefile harness, including when testing older onedir baseline runtimes.
     from release import freeze

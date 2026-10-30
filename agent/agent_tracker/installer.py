@@ -198,6 +198,31 @@ def installed_health(root, version):
         Path(str(health)+'.phase').unlink(missing_ok=True)
 
 
+def copy_bootstrap_files(release, root, refresh=False):
+    source = release / 'launcher'
+    wrappers = [source / executable_name(native, bootstrap=True) for native in (False, True)]
+    archives = sorted(path for path in source.glob('engine-*.zip')
+                      if re.fullmatch(r'engine-[a-f0-9]{64}\.zip', path.name)) if sys.platform == 'darwin' else []
+    if not archives:
+        if not refresh:
+            for path in wrappers:
+                shutil.copy2(path, root / path.name)
+        return
+    temporary = root / ('.bootstrap-' + uuid.uuid4().hex + '.tmp')
+    temporary.mkdir(mode=0o700)
+    try:
+        files = archives + wrappers
+        for path in files:
+            if path.is_symlink() or not path.is_file():
+                raise ValueError('Invalid bootstrap file')
+            shutil.copy2(path, temporary / path.name)
+        # Publish immutable sidecars before any wrapper that depends on them.
+        for path in files:
+            os.replace(temporary / path.name, root / path.name)
+    finally:
+        shutil.rmtree(temporary)
+
+
 def upgrade_existing(bundle,root,language='',integrate=True,health_check=None):
     from packaging.version import Version
     launcher=installed_launcher(root)
@@ -210,10 +235,11 @@ def upgrade_existing(bundle,root,language='',integrate=True,health_check=None):
             if manifest['target']!=build['target']:
                 raise InstallerError('setup_wrong_target')
             # Re-running setup also repairs login startup for existing installs.
-            # The stable launcher is retained even if the candidate rolls back.
+            # Bootstrap promotion follows successful health, never a failed candidate.
             if integrate:
                 autostart(launcher, True)
             if Version(manifest['version'])<=Version(active['version']):
+                copy_bootstrap_files(release_path(root, active['version']), root, refresh=True)
                 return launcher
             staged=manager.stage(bundle/'release.zip',manifest)
             with stopped_supervisor(root):
@@ -227,6 +253,7 @@ def upgrade_existing(bundle,root,language='',integrate=True,health_check=None):
                 except Exception as error:
                     manager.rollback()
                     raise InstallerError('setup_upgrade_failed') from error
+                copy_bootstrap_files(release_path(root, manifest['version']), root, refresh=True)
                 if language in LANGUAGES:
                     profile=read_json(root/'enrollment.json',{})
                     profile.update(language=language,language_source='manual')
@@ -283,9 +310,7 @@ def install(bundle, root, company_code, integrate=True, language="", company_res
         installed_build=read_json(destination / "build.json",{})
         if installed_build.get("version")!=release["version"] or installed_build.get("target")!=build["target"] or installed_build.get("launcher_protocol")!=1:
             raise ValueError("Incompatible installation layout")
-        for native in (False,True):
-            filename=executable_name(native,bootstrap=True)
-            shutil.copy2(destination / "launcher" / filename,root / filename)
+        copy_bootstrap_files(destination, root)
         shutil.copytree(destination / "extension",root / "extension")
         atomic_json(root / "trusted-update-keys.json",keys)
         enrollment = {"company_code": company_code}
@@ -500,7 +525,8 @@ class InstallerWindow:
 
 
 def main():
-    bundle = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "setup-payload"
+    from .setup_payload import setup_payload
+    bundle = setup_payload()
     try:
         code = bootstrap_code(sys.executable)
     except Exception:

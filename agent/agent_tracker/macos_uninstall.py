@@ -107,8 +107,12 @@ def _visit(parent, name, uid, device, remove=False, payload_links=False, parts=(
     _check(info, uid, device)
     if stat.S_ISLNK(info.st_mode):
         # Framework aliases, including dangling links, are entries, not subtrees.
-        if not (payload_links and len(parts) >= 5 and parts[:2] == ('install', 'versions') and parts[3] == 'app'):
-            raise ValueError('Link outside versioned application payload')
+        versioned = len(parts) >= 5 and parts[:2] == ('install', 'versions') and parts[3] == 'app'
+        engine = (len(parts) >= 5 and parts[0] == 'install' and
+                  re.fullmatch(r'\.engine-[a-f0-9]{64}', parts[1]) and
+                  parts[2:4] == ('SOFT Tracking Engine.app', 'Contents'))
+        if not (payload_links and (versioned or engine)):
+            raise ValueError('Link outside application payload')
         if getattr(info, 'st_flags', 0) & USER_FLAGS:
             raise ValueError('Protected symlink refused')
         if remove:
@@ -265,6 +269,28 @@ def bootloader_ancestors(uid):
     return set()
 
 
+def native_engine_process(root, executable, arguments):
+    if (len(arguments) < 6 or arguments[0] != str(executable) or
+            arguments[1] != '--tracking-role' or arguments[3] != '--tracking-wrapper' or arguments[5] != '--'):
+        return False
+    wrapper = Path(arguments[4])
+    try:
+        relative = wrapper.relative_to(root)
+        engine = executable.relative_to(wrapper.parent)
+    except ValueError:
+        return False
+    if arguments[2] == 'bootstrap-native':
+        native = relative == Path('soft-tracking-host')
+    elif arguments[2] == 'native':
+        native = (len(relative.parts) == 4 and relative.parts[0] == 'versions' and
+                  re.fullmatch(r'\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?', relative.parts[1]) and
+                  relative.parts[2:] == ('app', 'soft-tracking-host-app'))
+    else:
+        return False
+    return bool(native and len(engine.parts) == 5 and re.fullmatch(r'\.engine-[a-f0-9]{64}', engine.parts[0]) and
+                engine.parts[1:] == ('SOFT Tracking Engine.app', 'Contents', 'MacOS', 'soft-tracking-engine'))
+
+
 def stop_native_hosts(root):
     """Stop owned native hosts and wait for all other installed processes to exit."""
     import psutil
@@ -282,7 +308,9 @@ def stop_native_hosts(root):
             relative = executable.relative_to(root)
             if (relative == Path('soft-tracking-host') or
                     (len(relative.parts) == 4 and relative.parts[0] == 'versions' and
-                     relative.parts[2:] == ('app', 'soft-tracking-host-app'))):
+                     relative.parts[2:] == ('app', 'soft-tracking-host-app')) or
+                    (executable.name == 'soft-tracking-engine' and
+                     native_engine_process(root, executable, process.cmdline()))):
                 process.terminate()
             processes.append(process)
         except (psutil.NoSuchProcess, ValueError):

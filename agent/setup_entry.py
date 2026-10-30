@@ -16,7 +16,8 @@ def run():
     health_phase('setup-entry')
     from agent_tracker.electron_desktop import electron_path
     health_phase('setup-imported')
-    bundle = Path(getattr(sys, '_MEIPASS', Path(__file__).parent)) / 'setup-payload'
+    from agent_tracker.setup_payload import setup_payload
+    bundle = setup_payload()
     if '--migration-self-test' in sys.argv:
         from agent_tracker.migration_smoke import run_automatic
         from agent_tracker.core.files import atomic_json

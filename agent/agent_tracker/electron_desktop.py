@@ -457,10 +457,11 @@ def main(argv=None):
 
 def installer_main():
     from .installer import bootstrap_code
+    from .setup_payload import setup_payload
     parser = argparse.ArgumentParser()
     parser.add_argument('--health-check', action='store_true')
     args = parser.parse_args()
-    bundle = Path(getattr(sys, '_MEIPASS', Path(__file__).parent)) / 'setup-payload'
+    bundle = setup_payload()
     try:
         code = bootstrap_code(sys.executable)
     except Exception:

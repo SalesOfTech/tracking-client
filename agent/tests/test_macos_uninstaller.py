@@ -104,6 +104,60 @@ class MacUninstallContractTests(unittest.TestCase):
         browser.terminate.assert_not_called()
         wait.assert_called_once_with([own], timeout=5)
 
+    def test_engine_native_roles_are_stopped_but_other_roles_and_owners_are_not(self):
+        import psutil
+        root = Path('/Users/fixture/Library/Application Support/SOFT/TrackingV3/install')
+        cache = '.engine-' + 'a' * 64
+        def process(pid, wrapper, role, uid=501):
+            executable = wrapper.parent / cache / 'SOFT Tracking Engine.app/Contents/MacOS/soft-tracking-engine'
+            value = Mock(pid=pid)
+            value.uids.return_value = SimpleNamespace(real=uid, effective=uid)
+            value.exe.return_value = str(executable)
+            value.cmdline.return_value = [str(executable), '--tracking-role', role,
+                                         '--tracking-wrapper', str(wrapper), '--']
+            return value
+        bootstrap = process(101, root / 'soft-tracking-host', 'bootstrap-native')
+        native = process(102, root / 'versions/1.2.3/app/soft-tracking-host-app', 'native')
+        runtime = process(103, root / 'versions/1.2.3/app/soft-tracking-app', 'app')
+        foreign = process(104, root / 'soft-tracking-host', 'bootstrap-native', uid=502)
+        own = process(os.getpid(), root / 'versions/1.2.3/app/soft-tracking-app', 'app')
+        with patch.object(mac, 'current_user', return_value=(Path('/Users/fixture'), 501)), \
+                patch.object(mac, 'bootloader_ancestors', return_value=set()), \
+                patch.object(psutil, 'process_iter', return_value=[bootstrap, native, runtime, foreign, own]), \
+                patch.object(psutil, 'wait_procs', return_value=([], [runtime])) as wait:
+            with self.assertRaisesRegex(RuntimeError, 'still running'):
+                mac.stop_native_hosts(root)
+        bootstrap.terminate.assert_called_once_with()
+        native.terminate.assert_called_once_with()
+        runtime.terminate.assert_not_called()
+        foreign.terminate.assert_not_called()
+        own.terminate.assert_not_called()
+        wait.assert_called_once_with([bootstrap, native, runtime], timeout=5)
+
+    def test_engine_native_identity_requires_matching_cache_wrapper_and_role(self):
+        root = Path('/Users/fixture/install')
+        wrapper = root / 'versions/1.2.3/app/soft-tracking-host-app'
+        executable = wrapper.parent / ('.engine-' + 'a' * 64) / 'SOFT Tracking Engine.app/Contents/MacOS/soft-tracking-engine'
+        args = [str(executable), '--tracking-role', 'native', '--tracking-wrapper', str(wrapper), '--']
+        self.assertTrue(mac.native_engine_process(root, executable, args))
+        for index, value in ((0, '/other/engine'), (1, '--other'), (2, 'app'), (2, 'bootstrap-native'),
+                             (3, '--other'), (4, '/other/soft-tracking-host-app'),
+                             (4, str(root / 'versions/2.0.0/app/soft-tracking-host-app')),
+                             (4, 'soft-tracking-host-app'), (5, '--other')):
+            changed = list(args)
+            changed[index] = value
+            with self.subTest(index=index, value=value):
+                self.assertFalse(mac.native_engine_process(root, executable, changed))
+        self.assertFalse(mac.native_engine_process(root, executable, args[:5]))
+        for bad in ('versions/not-a-version/app', 'versions/../app'):
+            bad_wrapper = root / bad / 'soft-tracking-host-app'
+            bad_executable = bad_wrapper.parent / executable.relative_to(wrapper.parent)
+            self.assertFalse(mac.native_engine_process(root, bad_executable,
+                [str(bad_executable), '--tracking-role', 'native', '--tracking-wrapper', str(bad_wrapper), '--']))
+        for bad_cache in ('.engine-short', '.engine-' + 'A' * 64, '.engine-' + 'a' * 64 + '.tmp'):
+            bad_executable = wrapper.parent / bad_cache / 'SOFT Tracking Engine.app/Contents/MacOS/soft-tracking-engine'
+            self.assertFalse(mac.native_engine_process(root, bad_executable, [str(bad_executable), *args[1:]]))
+
     def test_only_verified_onefile_parent_is_exempt_not_same_exe_agent(self):
         import psutil
         root = Path('/Users/fixture/Library/Application Support/SOFT/TrackingV3/install')
@@ -195,6 +249,45 @@ class MacUninstallFilesystemTests(unittest.TestCase):
         mac.prepare(self.root)
         mac.cleanup(self.root)
         self.assertFalse(self.root.parent.exists())
+        self.assertEqual(sentinel.read_bytes(), b'keep')
+
+    def test_root_engine_framework_aliases_are_removed_without_following_targets(self):
+        cache = self.root / ('.engine-' + 'a' * 64)
+        contents = cache / 'SOFT Tracking Engine.app/Contents'
+        framework = contents / 'Frameworks/Python.framework/Versions/A'
+        framework.mkdir(parents=True)
+        (framework / 'Python').write_bytes(b'engine fixture')
+        (framework.parent / 'Current').symlink_to('A', target_is_directory=True)
+        (framework.parent.parent / 'Python').symlink_to('Versions/Current/Python')
+        outside = self.base / 'outside'
+        outside.mkdir()
+        (outside / 'keep').write_bytes(b'keep')
+        (contents / 'external').symlink_to(outside, target_is_directory=True)
+        (contents / 'dangling').symlink_to('missing')
+        mac.prepare(self.root)
+        mac.cleanup(self.root)
+        self.assertFalse(self.root.parent.exists())
+        self.assertEqual((outside / 'keep').read_bytes(), b'keep')
+
+    def test_root_engine_link_allowance_does_not_admit_redirected_cache_or_controls(self):
+        cache = self.root / ('.engine-' + 'a' * 64)
+        outside = self.base / 'outside'
+        outside.mkdir()
+        sentinel = outside / 'keep'
+        sentinel.write_bytes(b'keep')
+        paths = [cache, cache / 'SOFT Tracking Engine.app', cache / 'SOFT Tracking Engine.app/Contents',
+                 cache / 'control', self.root / '.engine-invalid/SOFT Tracking Engine.app/Contents/alias',
+                 self.root / ('engine-' + 'a' * 64 + '.zip')]
+        for path in paths:
+            with self.subTest(path=path):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.symlink_to(outside, target_is_directory=True)
+                try:
+                    with patch.object(mac, '_repair') as repair, self.assertRaises(ValueError):
+                        mac.prepare(self.root)
+                    repair.assert_not_called()
+                finally:
+                    path.unlink()
         self.assertEqual(sentinel.read_bytes(), b'keep')
 
     def test_control_symlink_rejected_before_any_write_or_repair(self):

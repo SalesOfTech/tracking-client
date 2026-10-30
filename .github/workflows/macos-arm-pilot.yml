@@ -1,0 +1,107 @@
+name: macOS ARM sealed engine pilot
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: macos-arm-pilot
+  cancel-in-progress: false
+env:
+  RELEASE_VERSION: 3.5.2-rc.1
+  RELEASE_TARGET: macos-arm64-modern
+  RELEASE_PROFILE: modern
+  SOFT_TRACKING_UI: electron
+  PYTHONPATH: ${{ github.workspace }}/agent
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-14
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.upload.outputs.tag }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.10.11'
+          architecture: arm64
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '22'
+          architecture: arm64
+      - run: python -m pip install -r agent/requirements-build.txt
+      - name: Regression tests
+        run: |
+          python -m unittest discover -s agent/tests -v
+          python -m unittest discover -s tools/tests -v
+      - name: Build UI and ARM-only candidate
+        env:
+          SOFT_TRACKING_MACOS_PILOT: '1'
+          TRACKING_UPDATE_KEY_B64: ${{ secrets.TRACKING_UPDATE_KEY_B64 }}
+          TRACKING_UPDATE_KEY_ID: ${{ vars.TRACKING_UPDATE_KEY_ID }}
+        run: |
+          npm ci --prefix desktop
+          npm run build --prefix desktop
+          npm test --prefix desktop
+          npm run package --prefix desktop
+          python tools/ci.py signing-key
+          python tools/ci.py build
+      - name: Remove signing seed
+        if: always()
+        run: python tools/ci.py cleanup-key
+      - name: Native acceptance on build OS
+        run: python tools/smoke_macos_pilot.py "artifacts/$RELEASE_TARGET/$RELEASE_VERSION/SOFT-Tracking-Setup.dmg"
+      - name: Store exact pilot DMG in draft (not latest)
+        id: upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="macos-arm-pilot-$RELEASE_VERSION-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          gh release create "$tag" --target "$GITHUB_SHA" --draft --prerelease --title "macOS ARM pilot $RELEASE_VERSION" --notes "ARM-only installation pilot. Not a stable release. Native acceptance pending. No production feed changed."
+          image="artifacts/$RELEASE_TARGET/$RELEASE_VERSION/SOFT-Tracking-Setup.dmg"
+          (cd "$(dirname "$image")" && shasum -a 256 SOFT-Tracking-Setup.dmg > SOFT-Tracking-Setup.dmg.sha256)
+          gh release upload "$tag" "$image" "$image.sha256"
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+  verify:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-26]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.10.11'
+          architecture: arm64
+      - run: python -m pip install -r agent/requirements-build.txt
+      - name: Download exact draft DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PILOT_TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          gh release download "$PILOT_TAG" --dir "$RUNNER_TEMP/pilot" --pattern 'SOFT-Tracking-Setup.dmg*'
+          (cd "$RUNNER_TEMP/pilot" && shasum -a 256 -c SOFT-Tracking-Setup.dmg.sha256)
+      - name: Native installed runtime and administrator fallback acceptance
+        run: python tools/smoke_macos_pilot.py "$RUNNER_TEMP/pilot/SOFT-Tracking-Setup.dmg"
+  publish-pilot:
+    needs: [build, verify]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Publish non-latest pilot for physical M1 testing only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PILOT_TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          gh release edit "$PILOT_TAG" --draft=false --prerelease --latest=false --notes "ARM-only installation pilot 3.5.2-rc.1. Exact DMG passed native installed runtime, native messaging, mounted setup and explicit administrator trust fallback checks on GitHub macOS 14/15/26 ARM runners. Physical M1 and next-release live update testing remain pending. Requires macOS 13+. Unsigned developer identity: not Apple-notarized, explicit trust may be required. Windows/Linux/Intel, stable release, widget and production update feed are unchanged."
