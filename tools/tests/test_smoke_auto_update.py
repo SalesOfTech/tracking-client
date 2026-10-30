@@ -296,6 +296,11 @@ class HarnessTests(unittest.TestCase):
             with self.assertRaises(requests.exceptions.ProxyError):
                 session.get('https://example.test/release.zip', timeout=5)
             self.assertTrue(fixture.seen('blocked_connect'))
+            response = session.get('https://' + smoke.HOSTS[0] + fixture.catalog, timeout=5)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.content, fixture.envelope)
+            self.assertFalse(fixture.seen('unauthorized'))
+            self.assertFalse(fixture.seen('unexpected'))
             self.assertEqual(session.get('http://' + smoke.HOSTS[0] + fixture.catalog, timeout=5).status_code, 403)
 
     def test_config_disables_collection_and_events_never_acknowledge_pending(self):

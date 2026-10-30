@@ -523,7 +523,9 @@ def main(old, new, timeout=420):
                 STAGE = 'automatic-fetch-evidence'
                 require(fixture.seen('catalog', old_version) and fixture.seen('download_complete'),
                         'Original supervisor did not fetch the release automatically')
-                for kind in ('unauthorized', 'unexpected', 'blocked_connect', 'server_error'):
+                # Unknown CONNECT attempts are denied locally before TLS/auth bytes.
+                # Their rejection proves isolation, not failure of the signed update.
+                for kind in ('unauthorized', 'unexpected', 'server_error'):
                     if fixture.seen(kind):
                         STAGE = 'fixture-' + kind.replace('_', '-')
                         if kind == 'server_error' and fixture.seen('server_disconnect'):
