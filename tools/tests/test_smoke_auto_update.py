@@ -86,13 +86,26 @@ class HarnessTests(unittest.TestCase):
         self.assertFalse((root / 'update-request.json').exists())
 
     def test_rejects_other_baseline_even_with_valid_signature(self):
-        self.assertEqual(smoke.SUPPORTED_BASELINES, {'3.4.2', '3.5.0'})
+        self.assertEqual(smoke.SUPPORTED_BASELINES, {'3.4.2', '3.5.0', '3.5.1'})
         value = dict(self.baseline, version='3.4.0')
         atomic_json(self.old / 'setup-payload/setup-build.json', value)
         atomic_json(self.old / 'setup-payload/manifest.json', self.envelope(value))
         with self.assertRaisesRegex(RuntimeError, 'Unsupported automatic-update baseline'):
             self.prepare()
         self.assertFalse((self.root / 'install').exists())
+
+    def test_latest_published_baseline_prepares_real_next_version(self):
+        old, new = self.root / 'published-351', self.root / 'candidate-352'
+        old.mkdir()
+        new.mkdir()
+        self.bundle(old, '3.5.1')
+        expected = self.bundle(new, '3.5.2')
+        root = self.root / 'install'
+        baseline, candidate, _, _ = smoke.prepare_install(old, new, root, signed, atomic_json)
+        self.assertEqual(baseline['version'], '3.5.1')
+        self.assertEqual(candidate, expected)
+        self.assertEqual(smoke.read_json(root / 'current.json'), {'version': '3.5.1'})
+        self.assertFalse((root / 'versions/3.5.2').exists())
 
     def test_rejects_mismatched_supported_setup_and_signed_versions(self):
         other = next(version for version in smoke.SUPPORTED_BASELINES if version != self.baseline_version)

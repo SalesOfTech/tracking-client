@@ -3,7 +3,7 @@
 OLD/NEW have the same layout as smoke_update.py (verified setup-payload directories;
 NEW also has manifest.json and release-VERSION.zip). The caller must authenticate
 the published baseline/candidate artifacts, as accept_release.download does.
-Only baselines 3.4.2 and 3.5.0 are supported, inferred from verified OLD metadata.
+Baselines 3.4.2, 3.5.0 and 3.5.1 are supported, inferred from verified OLD metadata.
 Run on the matching native desktop CI runner
 (Linux needs a display), with the build requirements and OpenSSL on PATH.
 
@@ -43,7 +43,7 @@ from urllib.parse import urlsplit
 import psutil
 
 ROOT = Path(__file__).resolve().parents[1]
-SUPPORTED_BASELINES = frozenset({'3.4.2', '3.5.0'})
+SUPPORTED_BASELINES = frozenset({'3.4.2', '3.5.0', '3.5.1'})
 HOSTS = ('tracking.salesoftech.com', 'tracking.salesof.tech')
 STAGE = 'arguments'
 
