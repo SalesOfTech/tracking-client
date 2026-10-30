@@ -47,27 +47,30 @@ def check(image):
             # The fallback is a deliberate administrator trust decision, not notarization.
             script = root/'Install.command'
             shutil.copy2(mount/'Install.command', script)
+            # Finder's initial trust decision is outside this headless test. Keep
+            # the native entry point runnable, but mark its nested payload as downloaded.
+            downloaded = app/'Contents/Resources'
             subprocess.run(['xattr', '-r', '-w', 'com.apple.quarantine',
-                            '0083;69000000;Chrome;00000000-0000-0000-0000-000000000001', str(app)], check=True)
+                            '0083;69000000;Chrome;00000000-0000-0000-0000-000000000001', str(downloaded)], check=True)
             subprocess.run(['xattr', '-r', '-w', 'com.apple.quarantine',
                             '0083;69000000;Chrome;00000000-0000-0000-0000-000000000001', str(engine)], check=True)
             # Exercise the native GUI launcher's preparation without automating the
             # system trust dialog. This entry point can only run a health check.
             health = root/'gui-prepared-health.json'
-            result = run_frozen([str(executable), '--setup-launch-self-test'],
-                                env=dict(os.environ, SOFT_TRACKING_HEALTH=str(health)), timeout=180)
+            result = run_setup_preparation(executable, health)
             assert result.returncode == 0, result.stderr.decode(errors='replace')[-4000:]
             assert_ui_health(health, metadata)
             assert subprocess.run(['xattr', '-p', 'com.apple.quarantine', str(engine)],
                                   capture_output=True).returncode != 0
-            subprocess.run(['xattr', '-p', 'com.apple.quarantine', str(app)], check=True, stdout=subprocess.DEVNULL)
+            subprocess.run(['xattr', '-p', 'com.apple.quarantine', str(downloaded)], check=True, stdout=subprocess.DEVNULL)
             # Re-run with no extraction cache, as on a user's first installation.
             shutil.rmtree(engine.parent)
             health = root/'gui-cold-health.json'
-            result = run_frozen([str(executable), '--setup-launch-self-test'],
-                                env=dict(os.environ, SOFT_TRACKING_HEALTH=str(health)), timeout=180)
+            result = run_setup_preparation(executable, health)
             assert result.returncode == 0, result.stderr.decode(errors='replace')[-4000:]
             assert_ui_health(health, metadata)
+            subprocess.run(['xattr', '-r', '-w', 'com.apple.quarantine',
+                            '0083;69000000;Chrome;00000000-0000-0000-0000-000000000001', str(app)], check=True)
             subprocess.run(['xattr', '-r', '-w', 'com.apple.quarantine',
                             '0083;69000000;Chrome;00000000-0000-0000-0000-000000000001', str(engine)], check=True)
             declined = run_frozen(['/bin/bash', str(script), '--health-check'], input=b'n\n',
@@ -94,6 +97,16 @@ def check(image):
             print('NOT tested: physical M1 full install, Finder/Gatekeeper consent interaction, macOS 11/12, next-release live update')
     finally:
         subprocess.run(['hdiutil', 'detach', str(mount)], check=True)
+
+
+def run_setup_preparation(executable, health):
+    try:
+        return run_frozen([str(executable), '--setup-launch-self-test'],
+                          env=dict(os.environ, SOFT_TRACKING_HEALTH=str(health)), timeout=180)
+    except subprocess.TimeoutExpired as error:
+        print('Native setup preparation timed out; captured diagnostics:', flush=True)
+        print((error.stderr or b'').decode(errors='replace')[-4000:], flush=True)
+        raise
 
 
 if __name__ == '__main__':
