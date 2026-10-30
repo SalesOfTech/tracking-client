@@ -193,7 +193,7 @@ private func launch(_ app: URL, role: String, wrapper: URL, arguments: [String])
 private func report(_ failure: Failure, setup: Bool, arguments: [String]) -> Never {
     FileHandle.standardError.write(Data((failure.rawValue + "\n").utf8))
     let headless = arguments.contains("--health-check") || arguments.contains("--migration-self-test")
-        || arguments.contains("--prepare-engine")
+        || arguments.contains("--prepare-engine") || arguments.contains("--trust-setup-engine")
     if setup && !headless {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
@@ -219,7 +219,9 @@ do {
           engineSHA256.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
           engineName == "engine-\(engineSHA256).zip" else { throw Failure.configuration }
     let prepareOnly = originalArguments.first == "--prepare-engine"
-    if prepareOnly && originalArguments.count != 1 { throw Failure.arguments }
+    let trustEngine = originalArguments.first == "--trust-setup-engine"
+    if (prepareOnly || trustEngine) && originalArguments.count != 1 { throw Failure.arguments }
+    if trustEngine && !isSetup { throw Failure.arguments }
 
     let archive: URL
     let parent: URL
@@ -249,7 +251,11 @@ do {
         cache = parent.appendingPathComponent(".engine-\(engineSHA256)", isDirectory: true)
     }
     let app = try prepareEngine(archive: archive, parent: parent, cache: cache)
-    if prepareOnly {
+    if trustEngine {
+        // Explicit administrator fallback only, after archive and bundle verification.
+        try runTool("/usr/bin/xattr", ["-dr", "-s", "com.apple.quarantine", app.path], failure: .cache)
+    }
+    if prepareOnly || trustEngine {
         let health: [String: Any] = ["ok": true, "role": selectedRole, "engine_sha256": engineSHA256,
                                    "bundle_path": app.path, "wrapper_path": wrapper.path]
         var json = try JSONSerialization.data(withJSONObject: health, options: [.sortedKeys])

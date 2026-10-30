@@ -10,6 +10,7 @@ import tempfile
 
 from smoke_helpers import run_frozen, assert_ui_health
 from smoke_package import main as smoke_package
+from release import copy_electron
 
 
 def check(image):
@@ -35,7 +36,11 @@ def check(image):
                                 env=env, timeout=120)
             assert result.returncode == 0, result.stderr.decode(errors='replace')[-4000:]
             bundle = root/'setup-payload'
-            shutil.copytree(app/'Contents/Resources/setup-payload', bundle, symlinks=True)
+            resources = app/'Contents/Resources/setup-payload'
+            shutil.copytree(resources, bundle, symlinks=True, ignore=shutil.ignore_patterns('electron'))
+            # The generic smoke compares transport layouts; the DMG itself keeps
+            # complete Electron links so its read-only setup can launch directly.
+            copy_electron(resources/'electron', bundle/'electron')
             metadata = json.loads((bundle/'setup-build.json').read_text())
             assert_ui_health(health, metadata)
             smoke_package(bundle)
@@ -44,13 +49,27 @@ def check(image):
             shutil.copy2(mount/'Install.command', script)
             subprocess.run(['xattr', '-r', '-w', 'com.apple.quarantine',
                             '0083;69000000;Chrome;00000000-0000-0000-0000-000000000001', str(app)], check=True)
+            subprocess.run(['xattr', '-r', '-w', 'com.apple.quarantine',
+                            '0083;69000000;Chrome;00000000-0000-0000-0000-000000000001', str(engine)], check=True)
+            declined = run_frozen(['/bin/bash', str(script), '--health-check'], input=b'n\n', timeout=30)
+            assert declined.returncode != 0
+            subprocess.run(['xattr', '-p', 'com.apple.quarantine', str(engine)], check=True, stdout=subprocess.DEVNULL)
             health = root/'consented-health.json'
             result = run_frozen(['/bin/bash', str(script), '--health-check'], input=b'y\n',
                                 env=dict(os.environ, SOFT_TRACKING_HEALTH=str(health)), timeout=180)
             assert result.returncode == 0, result.stderr.decode(errors='replace')[-4000:]
             assert_ui_health(health, metadata)
             # Consent must not remove quarantine from the original download.
+            assert subprocess.run(['xattr', '-p', 'com.apple.quarantine', str(engine)],
+                                  capture_output=True).returncode != 0
             subprocess.run(['xattr', '-p', 'com.apple.quarantine', str(app)], check=True, stdout=subprocess.DEVNULL)
+            # A cold-cache run must not reuse a previously healthy extraction.
+            shutil.rmtree(engine.parent)
+            health = root/'cold-consented-health.json'
+            result = run_frozen(['/bin/bash', str(script), '--health-check'], input=b'y\n',
+                                env=dict(os.environ, SOFT_TRACKING_HEALTH=str(health)), timeout=180)
+            assert result.returncode == 0, result.stderr.decode(errors='replace')[-4000:]
+            assert_ui_health(health, metadata)
             print('PASS: mounted DMG, sealed framework, frozen install/native messaging/start/stop, explicit trust fallback')
             print('NOT tested: physical M1, zero-consent Gatekeeper trust, macOS 11/12, next-release live update')
     finally:

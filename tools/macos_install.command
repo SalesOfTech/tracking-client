@@ -21,7 +21,8 @@ printf '%s\n' \
     'SOFT Tracking is not notarized by Apple. macOS cannot establish trusted developer identity for this package.' \
     'Continue only if you trust the source of this download.' \
     'This fallback copies Setup to a private temporary folder, verifies its code-signature integrity,' \
-    'then removes quarantine only from that copy. Signature integrity is not notarization.' \
+    'then removes quarantine only from that copy and its verified SOFT engine cache.' \
+    'Signature integrity is not notarization.' \
     'It does not change Gatekeeper settings or install Python or Homebrew.'
 printf 'Trust this download and run Setup for the current user? [y/N] '
 answer=''
@@ -62,6 +63,7 @@ executable="$copied_app/Contents/MacOS/SOFT-Tracking-Setup"
 /usr/bin/codesign --verify --deep --strict "$copied_app" >/dev/null 2>&1 || fail STI_E_SIGNATURE
 # Do not follow copied framework/resource links outside this private app.
 /usr/bin/xattr -dr -s com.apple.quarantine "$copied_app" >/dev/null 2>&1 || fail STI_E_QUARANTINE
+"$executable" --trust-setup-engine >/dev/null || fail STI_E_ENGINE_TRUST
 
 # Stay attached so the copied payload lives until Setup exits, and retain its status.
 "$executable" "$@"

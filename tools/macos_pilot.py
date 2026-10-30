@@ -103,12 +103,5 @@ def build_setup(out, setup, archive, wrapper, version):
     command('/usr/bin/ditto', app, image/app.name)
     shutil.copy2(ROOT/'tools/macos_install.command', image/'Install.command')
     (image/'Install.command').chmod(0o755)
-    (image/'README.txt').write_text(
-        'SOFT Tracking - macOS Apple Silicon pilot\n\n'
-        'Requires macOS 13 or later. Not notarized by Apple.\n'
-        'Open SOFT-Tracking-Setup. If macOS blocks it, an administrator may run:\n'
-        '/bin/bash followed by a space, then drag Install.command into Terminal and press Return.\n'
-        'Read the trust prompt and confirm only if this package came from SOFT.\n'
-        'Run under the employee account; do not use sudo. No global security settings change.\n'
-        'This pilot does not replace the stable update feed.\n', encoding='ascii')
+    shutil.copy2(ROOT/'tools/macos_pilot_readme.txt', image/'README.txt')
     return image
