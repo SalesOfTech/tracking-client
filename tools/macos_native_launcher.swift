@@ -12,6 +12,12 @@ private let engineSHA256 = "@@ENGINE_SHA256@@"
 private let engineName = "@@ENGINE_NAME@@"
 private let appName = "SOFT Tracking Engine.app"
 private let fm = FileManager.default
+private let setupDiagnostics = CommandLine.arguments.contains("--setup-launch-self-test")
+    || (CommandLine.arguments.contains("--prepared-setup-launch") && CommandLine.arguments.contains("--health-check"))
+
+private func setupTrace(_ phase: String) {
+    if setupDiagnostics { FileHandle.standardError.write(Data(("ST_SETUP_PHASE:" + phase + "\n").utf8)) }
+}
 
 private enum Failure: String, Error {
     case configuration = "STL_E_CONFIG"
@@ -230,6 +236,7 @@ private func preparedSetupDirectory(_ wrapper: URL) throws {
 }
 
 private func runPreparedSetup(wrapper: URL, arguments: [String]) throws -> Int32 {
+    setupTrace("copy-start")
     let source = wrapper.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     let temporary = URL(fileURLWithPath: NSTemporaryDirectory()).resolvingSymlinksInPath()
     try directory(temporary, owned: true)
@@ -243,15 +250,20 @@ private func runPreparedSetup(wrapper: URL, arguments: [String]) throws -> Int32
     try directory(root, owned: true, privateMode: true)
     let copy = root.appendingPathComponent("SOFT-Tracking-Setup.app")
     try runTool("/usr/bin/ditto", [source.path, copy.path], failure: .extraction)
+    setupTrace("copy-complete")
     let executable = copy.appendingPathComponent("Contents/MacOS/SOFT-Tracking-Setup")
     try preparedSetupDirectory(executable)
+    setupTrace("signature-verified")
     // Consent applies to this verified private copy, never to the original download.
     try runTool("/usr/bin/xattr", ["-dr", "-s", "com.apple.quarantine", copy.path], failure: .cache)
+    setupTrace("copy-trusted")
     let child = Process()
     child.executableURL = executable
     child.arguments = ["--prepared-setup-launch"] + arguments
     try child.run()
+    setupTrace("child-started")
     child.waitUntilExit()
+    setupTrace("child-exited")
     guard child.terminationReason == .exit else { throw Failure.execution }
     return child.terminationStatus
 }
@@ -279,6 +291,7 @@ private func report(_ failure: Failure, setup: Bool, arguments: [String]) -> Nev
 var originalArguments = Array(CommandLine.arguments.dropFirst())
 var isSetup = false
 do {
+    setupTrace("entry")
     let wrapper = try wrapperURL()
     let selectedRole = try role(for: wrapper)
     isSetup = selectedRole == "setup"
@@ -294,7 +307,9 @@ do {
     if (trustEngine || preparedSetup || setupSelfTest) && !isSetup { throw Failure.arguments }
     if setupSelfTest && originalArguments.count != 1 { throw Failure.arguments }
     if preparedSetup {
+        setupTrace("prepared-entry")
         try preparedSetupDirectory(wrapper)
+        setupTrace("prepared-verified")
         originalArguments.removeFirst()
     }
 
@@ -332,10 +347,13 @@ do {
         archive = parent.appendingPathComponent(engineName)
         cache = parent.appendingPathComponent(".engine-\(engineSHA256)", isDirectory: true)
     }
+    setupTrace("engine-prepare")
     let app = try prepareEngine(archive: archive, parent: parent, cache: cache)
+    setupTrace("engine-verified")
     if trustEngine || preparedSetup {
         // Explicit local trust, after archive and bundle verification.
         try runTool("/usr/bin/xattr", ["-dr", "-s", "com.apple.quarantine", app.path], failure: .cache)
+        setupTrace("engine-trusted")
     }
     if prepareOnly || trustEngine {
         let health: [String: Any] = ["ok": true, "role": selectedRole, "engine_sha256": engineSHA256,
@@ -344,6 +362,7 @@ do {
         json.append(0x0a)
         try FileHandle.standardOutput.write(contentsOf: json)
     } else {
+        setupTrace("engine-launch")
         try launch(app, role: selectedRole, wrapper: wrapper, arguments: originalArguments)
     }
 } catch let failure as Failure {
