@@ -1,3 +1,4 @@
+import json
 import sys
 import tempfile
 import unittest
@@ -11,7 +12,12 @@ from agent_tracker.core.version import application_version
 
 class VersionTests(unittest.TestCase):
     def test_source_version_is_stable(self):
-        self.assertEqual('3.5.0', application_version())
+        root = Path(__file__).resolve().parents[2]
+        version = application_version()
+        self.assertRegex(version, r'^\d+\.\d+\.\d+$')
+        for name in ('package.json', 'desktop/package.json'):
+            self.assertEqual(json.loads((root / name).read_text())['version'], version)
+        self.assertEqual(json.loads((root / 'extension/manifest.json').read_text())['version_name'], version)
 
     def test_frozen_version_belongs_to_running_payload(self):
         with tempfile.TemporaryDirectory() as tmp:
