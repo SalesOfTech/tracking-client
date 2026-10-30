@@ -580,8 +580,8 @@ def test():
         STAGE = 'fresh-installed-runtime'
         try:
             with (root / 'fresh-installed-runtime.private.log').open('wb') as log:
-                subprocess.run([sys.executable, str(ROOT / 'candidate/tools/smoke_package.py'),
-                                str(root / 'current/setup-payload')], env=env, cwd=root,
+                subprocess.run([sys.executable, str(ROOT / 'tools/smoke_package.py'),
+                                str(root / 'current/setup-payload'), '--published-payload'], env=env, cwd=root,
                                stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                                timeout=900, check=True)
         except subprocess.CalledProcessError:

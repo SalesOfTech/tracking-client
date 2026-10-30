@@ -11,7 +11,11 @@ import time
 from packaging.version import Version
 
 ROOT=Path(__file__).resolve().parents[1]
-sys.path.insert(0,str(ROOT/'agent'))
+CLIENT_ROOT=Path(os.environ.get('TRACKING_SMOKE_CLIENT_ROOT', ROOT)).resolve()
+sys.path.insert(0,str(CLIENT_ROOT/'agent'))
+import agent_tracker
+if Path(agent_tracker.__file__).resolve() != CLIENT_ROOT/'agent/agent_tracker/__init__.py':
+    raise RuntimeError('Smoke test imported another client checkout')
 from agent_tracker.installer import install
 from agent_tracker.core.release_manager import executable_name,release_path
 from agent_tracker.native_host import ALLOWED_ORIGIN
@@ -43,7 +47,7 @@ def smoke_macos_uninstall(app, metadata, version, env):
             raise RuntimeError('Real onefile macOS uninstall smoke failed: ' + result.stderr.decode(errors='replace')[-8000:])
 
 
-def main(bundle):
+def main(bundle, published_payload=False):
     bundle = Path(bundle)
     metadata = json.loads((bundle/'setup-build.json').read_text(encoding='utf-8'))
     # Older baseline packages legitimately predate the standalone migration tool.
@@ -55,13 +59,15 @@ def main(bundle):
         result = run_frozen([str(bundle.parent / migration['file']), '--self-test'], env=dict(os.environ), timeout=180)
         if result.returncode or b'PASS: isolated frozen migration smoke' not in result.stdout:
             raise RuntimeError('Frozen migration smoke failed (no real user migration was requested)')
-    for base in (Path(bundle) / 'guide',):
+    # Published runtime archives have no external setup app or offline guide;
+    # the separate cold PKG probe exercises the real installer from that release.
+    for base in (() if published_payload else (Path(bundle) / 'guide',)):
         for name in ('setup.html', 'setup.js', 'setup.css', 'locale.js', 'icons/icon48.png'):
             assert (base / name).is_file(), 'Missing offline setup guide: ' + name
     with tempfile.TemporaryDirectory(prefix='soft-tracking-package-') as temporary:
         root=Path(temporary)/'install'
         install(Path(bundle),root,'a'*32,integrate=False,language='cs')
-        for name in ('setup.html', 'setup.js', 'setup.css', 'locale.js'):
+        for name in (() if published_payload else ('setup.html', 'setup.js', 'setup.css', 'locale.js')):
             assert (root / 'extension' / name).is_file(), 'Missing installed guide: ' + name
         health=Path(temporary)/'health.json'
         env=dict(os.environ,SOFT_TRACKING_INSTALL=str(root),SOFT_TRACKING_HEALTH=str(health),LOCALAPPDATA=temporary,XDG_DATA_HOME=temporary)
@@ -71,13 +77,13 @@ def main(bundle):
             env['PYINSTALLER_STRICT_UNPACK_MODE'] = '1'
         version=json.loads((root/'current.json').read_text())['version']
         app=release_path(root,version)/'app'/executable_name()
-        assert_ui_payload(app.parent, metadata, bundle)
+        assert_ui_payload(app.parent, metadata, None if published_payload else bundle)
         smoke_macos_uninstall(app, metadata, version, env)
         result=run_frozen([str(app),'--health-check'],env=env,timeout=60)
         if result.returncode!=0 or not health.exists():
             raise RuntimeError('Frozen application health check failed: '+result.stderr.decode(errors='replace'))
         assert_ui_health(health, metadata)
-        if Version(version) >= Version('3.4.0'):
+        if not published_payload and Version(version) >= Version('3.4.0'):
             installer = bundle.parent / {'windows': 'SOFT-Tracking-Setup.exe',
                                          'macos': 'SOFT-Tracking-Setup.app/Contents/MacOS/SOFT-Tracking-Setup',
                                          'linux': 'SOFT-Tracking-Setup.run'}[metadata['os']]
@@ -88,7 +94,7 @@ def main(bundle):
                 diagnostic = Path(str(migration_marker) + '.error')
                 detail = diagnostic.read_text(encoding='utf-8')[:8000] if diagnostic.is_file() else 'No diagnostic marker'
                 raise RuntimeError('Frozen full installer automatic migration smoke failed: ' + detail)
-        if metadata.get('ui') == 'electron':
+        if not published_payload and metadata.get('ui') == 'electron':
             installer = bundle.parent / {'windows': 'SOFT-Tracking-Setup.exe',
                                          'macos': 'SOFT-Tracking-Setup.app/Contents/MacOS/SOFT-Tracking-Setup',
                                          'linux': 'SOFT-Tracking-Setup.run'}[metadata['os']]
@@ -172,4 +178,8 @@ def main(bundle):
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('bundle');args=parser.parse_args();main(args.bundle)
+    parser=argparse.ArgumentParser()
+    parser.add_argument('bundle')
+    parser.add_argument('--published-payload', action='store_true')
+    args=parser.parse_args()
+    main(args.bundle, published_payload=args.published_payload)

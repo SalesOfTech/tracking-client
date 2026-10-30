@@ -818,8 +818,8 @@ class GateTests(unittest.TestCase):
                     self.assertTrue(call.kwargs['check'])
                     self.assertEqual(call.kwargs['stderr'], subprocess.STDOUT)
                     self.assertTrue(Path(call.kwargs['stdout'].name).is_relative_to(root))
-                self.assertEqual(fresh.args[0], [sys.executable, str(ROOT / 'candidate/tools/smoke_package.py'),
-                                                str(root / 'current/setup-payload')])
+                self.assertEqual(fresh.args[0], [sys.executable, str(ROOT / 'tools/smoke_package.py'),
+                                                str(root / 'current/setup-payload'), '--published-payload'])
                 self.assertEqual(fresh.kwargs['env']['HOME'], str(root / 'home'))
 
     def test_fresh_baseline_exception_is_only_for_macos_352(self):
