@@ -11,6 +11,25 @@ from tools.release import build_plan
 
 
 class MacOSPilotTests(unittest.TestCase):
+    def test_stable_arm_uses_proven_engine_without_changing_other_targets(self):
+        with patch.dict(os.environ, SOFT_TRACKING_MACOS_PILOT='', SOFT_TRACKING_UI='electron'), \
+                patch('tools.release.require_github_runner'):
+            for version in ('3.5.2', '3.6.0'):
+                args = argparse.Namespace(version=version, profile='modern')
+                for target in [('macos', 'arm64'), ('macos', 'x64'), ('windows', 'arm64'), ('linux', 'arm64')]:
+                    with self.subTest(version=version, target=target), \
+                            patch('agent_tracker.core.target.runtime_target', return_value=target):
+                        metadata = build_plan(args)['metadata']
+                        self.assertNotIn('build_channel', metadata)
+                        self.assertEqual(metadata.get('macos_engine'),
+                                         'sealed-onedir-v1' if target[0] == 'macos' else None)
+
+    def test_engine_architecture_is_native_not_relabelled(self):
+        self.assertIn("target_arch='x86_64'", engine_spec('x64'))
+        self.assertIn("target_arch='arm64'", engine_spec('arm64'))
+        with self.assertRaises(ValueError):
+            engine_spec('x86')
+
     def test_engine_uses_collect_bundle_not_onefile(self):
         spec = engine_spec()
         compile(spec, '<engine spec>', 'exec')

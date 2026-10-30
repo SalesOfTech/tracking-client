@@ -4,16 +4,149 @@ import string
 import sys
 import tempfile
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, call, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from agent_tracker.i18n import LANGUAGES, TEXT, select_language, translate, system_locale, client_language, detect_language
-from agent_tracker.core.client import Client
-from agent_tracker.desktop import Desktop
-from agent_tracker.installer import InstallerWindow
+from agent_tracker.i18n import LANGUAGES, TEXT, select_language, translate, system_locale, client_language, detect_language, _macos_locale
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+class NativeLocaleTests(unittest.TestCase):
+    def setUp(self):
+        self.context = ExitStack()
+        self.addCleanup(self.context.close)
+        self.context.enter_context(patch('agent_tracker.i18n.os.name', 'posix'))
+        self.context.enter_context(patch('agent_tracker.i18n.sys.platform', 'darwin'))
+        self.context.enter_context(patch.dict(os.environ, {'LANG': 'en_US.UTF-8'}, clear=True))
+        self.context.enter_context(patch.dict(sys.modules, {'Foundation': None}))
+
+    def core_foundation(self, tags=('ru-NL', 'en-US'), country='NL'):
+        cf = Mock()
+        values = {index + 100: tag.encode('utf-8') for index, tag in enumerate(tags)}
+        values[300] = country.encode('utf-8')
+        cf.CFLocaleCopyPreferredLanguages.return_value = 1
+        cf.CFArrayGetCount.return_value = len(tags)
+        cf.CFArrayGetValueAtIndex.side_effect = lambda array, index: index + 100
+        cf.CFStringGetLength.side_effect = lambda value: len(values[value])
+        cf.CFStringGetMaximumSizeForEncoding.side_effect = lambda length, encoding: length * 4
+
+        def copy_string(value, buffer, size, encoding):
+            self.assertEqual(0x08000100, encoding)
+            self.assertGreater(size, len(values[value]))
+            buffer.value = values[value]
+            return True
+
+        cf.CFStringGetCString.side_effect = copy_string
+        cf.CFLocaleCopyCurrent.return_value = 2
+        cf.CFLocaleGetValue.return_value = 300
+        self.context.enter_context(patch('ctypes.c_void_p.in_dll', return_value=400))
+        load = self.context.enter_context(patch('ctypes.CDLL', return_value=cf))
+        return cf, load
+
+    def test_macos_native_languages_without_foundation_in_frozen_process(self):
+        import ctypes
+        cf, load = self.core_foundation()
+        with patch.object(sys, 'frozen', True, create=True):
+            self.assertEqual((['ru-NL', 'en-US'], 'NL'), system_locale())
+        load.assert_called_once_with('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
+        self.assertEqual(ctypes.c_void_p, cf.CFLocaleCopyPreferredLanguages.restype)
+        self.assertEqual([ctypes.c_void_p, ctypes.c_long], cf.CFArrayGetValueAtIndex.argtypes)
+        self.assertEqual(ctypes.c_void_p, cf.CFArrayGetValueAtIndex.restype)
+        self.assertIsNone(cf.CFRelease.restype)
+        self.assertEqual([call(1), call(2)], cf.CFRelease.call_args_list)
+
+    def test_macos_ui_language_wins_over_environment_and_region(self):
+        for tag, country, expected in [('ru-NL', 'NL', 'ru'), ('cs-CZ', 'RU', 'cs'),
+                                       ('en-US', 'RU', 'en'), ('uz-Latn-UZ', 'RU', 'uz')]:
+            with self.subTest(tag=tag), patch('agent_tracker.i18n._macos_locale', return_value=([tag], country)):
+                self.assertEqual(expected, detect_language())
+                self.assertEqual(expected, client_language('', {'language': 'en'}))
+
+    def test_manual_choices_bypass_os_detection(self):
+        with patch('agent_tracker.i18n.system_locale') as native:
+            for language in LANGUAGES:
+                self.assertEqual(language, detect_language(language))
+                self.assertEqual(language, client_language(language, {'language': 'ru', 'language_source': 'manual'}))
+                self.assertEqual(language, client_language('', {'language': language, 'language_source': 'manual'}))
+            native.assert_not_called()
+
+    def test_macos_keeps_languages_when_region_lookup_fails(self):
+        cf, _ = self.core_foundation()
+        cf.CFLocaleGetValue.side_effect = ValueError('No regional format')
+        self.assertEqual((['ru-NL', 'en-US'], ''), system_locale())
+        self.assertEqual([call(1), call(2)], cf.CFRelease.call_args_list)
+
+    def test_macos_releases_array_on_string_conversion_failure(self):
+        cf, _ = self.core_foundation()
+        cf.CFStringGetCString.side_effect = None
+        cf.CFStringGetCString.return_value = False
+        with self.assertRaises(ValueError):
+            _macos_locale()
+        cf.CFRelease.assert_called_once_with(1)
+        self.assertEqual((['en_US.UTF-8'], ''), system_locale())
+
+    def test_macos_null_references_are_not_released(self):
+        cf, _ = self.core_foundation()
+        cf.CFLocaleCopyPreferredLanguages.return_value = None
+        cf.CFLocaleCopyCurrent.return_value = None
+        self.assertEqual(([], ''), _macos_locale())
+        cf.CFRelease.assert_not_called()
+        cf.CFArrayGetCount.assert_not_called()
+        self.assertEqual((['en_US.UTF-8'], ''), system_locale())
+
+    def test_macos_foundation_fallback(self):
+        native = SimpleNamespace(preferredLanguages=lambda: ['cs-CZ', 'en-US'],
+                                 currentLocale=lambda: SimpleNamespace(countryCode=lambda: 'RU'))
+        with patch('ctypes.CDLL', side_effect=OSError('Framework unavailable')), \
+                patch.dict(sys.modules, {'Foundation': SimpleNamespace(NSLocale=native)}):
+            self.assertEqual((['cs-CZ', 'en-US'], 'RU'), system_locale())
+            self.assertEqual('cs', detect_language())
+
+    def test_macos_foundation_keeps_languages_without_region(self):
+        native = SimpleNamespace(preferredLanguages=lambda: ['ru-NL'])
+        with patch('agent_tracker.i18n._macos_locale', return_value=([], '')), \
+                patch.dict(sys.modules, {'Foundation': SimpleNamespace(NSLocale=native)}):
+            self.assertEqual((['ru-NL'], ''), system_locale())
+
+    def test_macos_empty_foundation_languages_use_environment(self):
+        native = SimpleNamespace(preferredLanguages=lambda: [])
+        with patch('agent_tracker.i18n._macos_locale', return_value=([], '')), \
+                patch.dict(sys.modules, {'Foundation': SimpleNamespace(NSLocale=native)}):
+            self.assertEqual((['en_US.UTF-8'], ''), system_locale())
+
+    def test_macos_and_linux_environment_fallback_order(self):
+        cases = [({'LC_ALL': 'cs_CZ.UTF-8', 'LC_MESSAGES': 'ru_RU.UTF-8', 'LANG': 'en_US.UTF-8'}, 'cs_CZ.UTF-8'),
+                 ({'LC_MESSAGES': 'ru_RU.UTF-8', 'LANG': 'en_US.UTF-8'}, 'ru_RU.UTF-8'),
+                 ({'LANG': 'uz_UZ.UTF-8'}, 'uz_UZ.UTF-8'), ({}, 'en_GB')]
+        for platform in ('darwin', 'linux'):
+            for environment, expected in cases:
+                with self.subTest(platform=platform, environment=environment), \
+                        patch('agent_tracker.i18n.sys.platform', platform), \
+                        patch('ctypes.CDLL', side_effect=OSError('Unavailable')) as native, \
+                        patch.dict(os.environ, environment, clear=True), \
+                        patch('agent_tracker.i18n.locale.getlocale', return_value=('en_GB', 'UTF-8')):
+                    self.assertEqual(([expected], ''), system_locale())
+                    if platform == 'linux':
+                        native.assert_not_called()
+
+    def test_macos_and_linux_empty_locale_is_english(self):
+        for platform in ('darwin', 'linux'):
+            with self.subTest(platform=platform), patch('agent_tracker.i18n.sys.platform', platform), \
+                    patch('ctypes.CDLL', side_effect=OSError('Unavailable')), \
+                    patch.dict(os.environ, {}, clear=True), \
+                    patch('agent_tracker.i18n.locale.getlocale', side_effect=ValueError('Unknown locale')):
+                self.assertEqual(([], ''), system_locale())
+                self.assertEqual('en', detect_language())
+
+    def test_windows_and_linux_regional_selection_is_unchanged(self):
+        for platform in ('win32', 'linux'):
+            with self.subTest(platform=platform), patch('agent_tracker.i18n.sys.platform', platform), \
+                    patch('agent_tracker.i18n.system_locale', return_value=(['en-US'], 'RU')):
+                self.assertEqual('ru', detect_language())
 
 
 class LanguageTests(unittest.TestCase):
@@ -53,6 +186,7 @@ class LanguageTests(unittest.TestCase):
         self.assertEqual('uz', select_language(['uz-Latn-UZ'], region='RU'))
 
     def test_russian_ui_wins_over_region_and_old_automatic_default(self):
+        from agent_tracker.installer import InstallerWindow
         with patch('agent_tracker.i18n.system_locale', return_value=(['ru-RU', 'en-US'], 'NL')):
             self.assertEqual('ru', detect_language())
             self.assertEqual('ru', client_language('', {'language': 'en'}))
@@ -95,6 +229,8 @@ class LanguageTests(unittest.TestCase):
         ImageGrab.grab(bbox=(x, y, x + root.winfo_width(), y + root.winfo_height())).save(target / (name + '.png'))
 
     def test_desktop_translates_without_losing_input_or_restarting_worker(self):
+        from agent_tracker.core.client import Client
+        from agent_tracker.desktop import Desktop
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=False):
             client = Client(Path(tmp))
             client.state.set('language', 'en')
@@ -125,6 +261,7 @@ class LanguageTests(unittest.TestCase):
                     client.close()
 
     def test_installer_has_four_languages_and_preserves_company(self):
+        from agent_tracker.installer import InstallerWindow
         app = InstallerWindow(ROOT / 'extension', 'b' * 32, 'en')
         try:
             for language, label in LANGUAGES.items():
@@ -139,6 +276,8 @@ class LanguageTests(unittest.TestCase):
             app.root.destroy()
 
     def test_paste_button_virtual_event_and_russian_keyboard(self):
+        from agent_tracker.core.client import Client
+        from agent_tracker.desktop import Desktop
         import tkinter as tk
         from types import SimpleNamespace
         from agent_tracker.ui.clipboard import attach

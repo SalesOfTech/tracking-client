@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Payload version (3.2.0); candidate publication is not release approval
+        description: Payload version; candidate publication is not release approval
         required: true
-        default: 3.2.0
+        default: 3.5.2
         type: string
 
 permissions:
@@ -166,6 +166,20 @@ jobs:
           else
             python tools/ci.py build
           fi
+      - name: Cold macOS PKG installation and normal setup window
+        if: runner.os == 'macOS'
+        run: python tools/smoke_macos_pkg.py "artifacts/$RELEASE_TARGET/$RELEASE_VERSION/SOFT-Tracking-Setup.pkg" "$RUNNER_TEMP/pkg-evidence" --require-cold
+      - name: Frozen macOS system-language detection and manual choices
+        if: runner.os == 'macOS'
+        run: python tools/smoke_macos_locale.py "artifacts/$RELEASE_TARGET/$RELEASE_VERSION/SOFT-Tracking-Setup.dmg" --allow-runner-preferences --evidence "$RUNNER_TEMP/pkg-evidence/locale.json"
+      - name: Preserve macOS installation and locale evidence
+        if: always() && runner.os == 'macOS'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pkg-evidence-${{ matrix.target }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pkg-evidence
+          if-no-files-found: warn
+          retention-days: 7
       - name: Frozen installer and native messaging smoke test
         run: |
           if [ "$RUNNER_OS" = Linux ]; then

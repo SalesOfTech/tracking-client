@@ -303,6 +303,16 @@ class GateTests(unittest.TestCase):
                              [str(self.root / version) for version in ('3.5.0', '3.4.2')])
             self.assertTrue(all(call.kwargs['check'] for call in automatic))
 
+    def test_352_requires_public_351_pin_without_new_private_url_slot(self):
+        with patch.object(gate, 'VERSION', '3.5.2'):
+            self.assertEqual(gate.upgrade_baselines(gate.VERSION)[0], '3.5.1')
+            self.assertIn('3.5.1', gate.PUBLIC_BASELINES)
+            private = self.urls(['3.1.0', '3.0.4'])
+            self.assertEqual(gate.baseline_urls(json.dumps(private)), private)
+            del private['3.0.4']
+            with self.assertRaises(ValueError):
+                gate.baseline_urls(json.dumps(private))
+
     def test_automatic_failure_exposes_only_known_stage(self):
         path = self.root / 'private.log'
         path.write_text('FAIL: automatic-update stage=automatic-transition exception=RuntimeError\n')
@@ -644,24 +654,32 @@ class GateTests(unittest.TestCase):
         self.assertEqual(gate.smoke_failure_stage(path), 'subprocess-failure')
         self.assertEqual(gate.smoke_failure_stage(self.root / 'absent.log'), 'subprocess-failure')
 
-    def signed_bundle(self, mutate=None):
-        row = gate.TARGETS[0]
-        metadata = {'version': '3.2.0', 'target': row['target'], 'os': 'windows', 'architecture': 'x64',
-                    'ui': 'electron', 'electron_version': '44.3.0', 'launcher_protocol': 1,
-                    'minimum_os_version': '10.0.18362'}
+    def signed_bundle(self, mutate=None, row=None, version='3.2.0', engine=None, installer=None):
+        row = row or gate.TARGETS[0]
+        metadata = {'version': version, 'target': row['target'], 'os': row['target'].split('-')[0],
+                    'architecture': row['arch'],
+                    'ui': row['ui'], 'electron_version': '44.3.0', 'launcher_protocol': 1}
+        if metadata['os'] == 'linux':
+            metadata['minimum_glibc'] = '2.35'
+        else:
+            metadata['minimum_os_version'] = '13.0' if metadata['os'] == 'macos' else '10.0.18362'
+        if engine is not None:
+            metadata['macos_engine'] = engine
+        installer = installer or gate.installer_filename(version, metadata)
         inner = zipped({'build.json': json.dumps(metadata)})
         manifest = dict(metadata, protocol=3, size=len(inner), sha256=hashlib.sha256(inner).hexdigest(),
                         expires_at=int(time.time()) + 600, url='https://tracking.salesoftech.com/fixture.zip')
         raw = json.dumps(manifest).encode()
         envelope = {'key_id': 'fixture', 'payload': base64.b64encode(raw).decode(),
                     'signature': base64.b64encode(self.key.sign(raw).signature).decode()}
-        setup = dict(metadata, file='SOFT-Tracking-Setup-3.2.0.exe', sha256=hashlib.sha256(b'fixture installer').hexdigest())
-        provenance = {'version': '3.2.0', 'target': row['target'], 'commit': 'a' * 40,
+        setup = dict(metadata, file=installer, sha256=hashlib.sha256(b'fixture installer').hexdigest())
+        provenance = {'version': version, 'target': row['target'], 'commit': 'a' * 40,
                       'run_url': 'https://github.com/' + self.repo + '/actions/runs/123', 'build': metadata}
-        files = {'manifest.json': json.dumps(envelope), 'release-3.2.0.zip': inner,
+        files = {'manifest.json': json.dumps(envelope), 'release-' + version + '.zip': inner,
                  'provenance.json': json.dumps(provenance), 'setup.json': json.dumps(setup),
-                 'SOFT-Tracking-Setup-3.2.0.exe': b'fixture installer', 'dependencies.txt': b'fixture',
-                 'size-report.json': '{}', 'desktop-package-lock.json': '{}'}
+                 installer: b'fixture installer', 'dependencies.txt': b'fixture', 'size-report.json': '{}'}
+        if row['ui'] == 'electron':
+            files['desktop-package-lock.json'] = '{}'
         if mutate:
             mutate(files)
         path = self.root / ('bundle-' + str(time.monotonic_ns()) + '.zip')
@@ -674,6 +692,137 @@ class GateTests(unittest.TestCase):
         self.assertEqual(result['version'], '3.2.0')
         self.assertEqual((self.root / 'staged/release-3.2.0.zip').read_bytes(),
                          (self.root / 'staged/setup-payload/release.zip').read_bytes())
+
+    def test_sealed_macos_pkg_staging_keeps_exact_installer_bytes(self):
+        for row in gate.TARGETS:
+            if not row['target'].startswith('macos-'):
+                continue
+            with self.subTest(target=row['target']), patch.object(gate, 'VERSION', '3.5.2'):
+                path, _ = self.signed_bundle(row=row, version='3.5.2', engine='sealed-onedir-v1')
+                destination = self.root / row['target']
+                result = gate.stage_candidate(path, destination, row, self.plan)
+                self.assertEqual(result['macos_engine'], 'sealed-onedir-v1')
+                self.assertEqual((destination / 'SOFT-Tracking-Setup-3.5.2.pkg').read_bytes(), b'fixture installer')
+
+    def test_pkg_staging_rejects_wrong_format_version_platform_and_engine(self):
+        mac = next(row for row in gate.TARGETS if row['target'] == 'macos-arm64-modern')
+        cases = [(mac, '3.5.2', 'sealed-onedir-v1', 'SOFT-Tracking-Setup-3.5.2.dmg'),
+                 (mac, '3.5.2', 'sealed-onedir-v1', 'SOFT-Tracking-Setup-3.5.2.zip'),
+                 (mac, '3.5.2', 'sealed-onedir-v1', 'SOFT-Tracking-Setup-3.5.1.pkg'),
+                 (mac, '3.5.2', None, 'SOFT-Tracking-Setup-3.5.2.pkg'),
+                 (mac, '3.5.2', 'unknown', 'SOFT-Tracking-Setup-3.5.2.pkg'),
+                 (mac, '3.5.1', 'sealed-onedir-v1', 'SOFT-Tracking-Setup-3.5.1.pkg')]
+        cases.extend((row, '3.5.2', 'sealed-onedir-v1', 'SOFT-Tracking-Setup-3.5.2.pkg')
+                     for row in gate.TARGETS if not row['target'].startswith('macos-'))
+        for index, (row, version, engine, filename) in enumerate(cases):
+            with self.subTest(case=(row['target'], version, engine, filename)), patch.object(gate, 'VERSION', version):
+                path, _ = self.signed_bundle(row=row, version=version, engine=engine, installer=filename)
+                with self.assertRaises(ValueError):
+                    gate.stage_candidate(path, self.root / str(index), row, self.plan)
+
+    def test_pkg_staging_checks_hash_and_engine_agreement_in_all_metadata(self):
+        row = next(row for row in gate.TARGETS if row['target'] == 'macos-arm64-modern')
+        def change_engine(files, document):
+            if document == 'manifest.json':
+                envelope = json.loads(files[document])
+                value = json.loads(base64.b64decode(envelope['payload']))
+                value.pop('macos_engine')
+                raw = json.dumps(value).encode()
+                envelope.update(payload=base64.b64encode(raw).decode(),
+                                signature=base64.b64encode(self.key.sign(raw).signature).decode())
+                files[document] = json.dumps(envelope)
+                return
+            value = json.loads(files[document])
+            metadata = value['build'] if document == 'provenance.json' else value
+            metadata.pop('macos_engine')
+            files[document] = json.dumps(value)
+        mutations = [lambda files: files.update({'SOFT-Tracking-Setup-3.5.2.pkg': b'tampered'}),
+                     lambda files: change_engine(files, 'manifest.json'),
+                     lambda files: change_engine(files, 'setup.json'),
+                     lambda files: change_engine(files, 'provenance.json')]
+        for index, mutation in enumerate(mutations):
+            with self.subTest(index=index), patch.object(gate, 'VERSION', '3.5.2'):
+                path, _ = self.signed_bundle(mutation, row=row, version='3.5.2', engine='sealed-onedir-v1')
+                with self.assertRaises(ValueError):
+                    gate.stage_candidate(path, self.root / str(index), row, self.plan)
+
+    def test_existing_formats_still_stage_for_all_targets(self):
+        for row in gate.TARGETS:
+            with self.subTest(target=row['target']), patch.object(gate, 'VERSION', '3.5.1'):
+                path, _ = self.signed_bundle(row=row, version='3.5.1')
+                gate.stage_candidate(path, self.root / row['target'], row, self.plan)
+
+    def test_cold_pkg_precedes_every_genuine_upgrade_on_both_macs(self):
+        console_home = str(self.root / 'console-home')
+        for row in gate.TARGETS:
+            if not row['target'].startswith('macos-'):
+                continue
+            root = self.root / row['target']
+            with self.subTest(target=row['target']), patch.object(gate, 'VERSION', '3.5.2'):
+                path, _ = self.signed_bundle(row=row, version='3.5.2', engine='sealed-onedir-v1')
+                gate.stage_candidate(path, root / 'current', row, self.plan)
+                pwd_module = Mock()
+                pwd_module.getpwuid.return_value.pw_dir = console_home
+                with patch.object(gate, 'read_plan', return_value=self.plan), \
+                        patch.dict(sys.modules, {'pwd': pwd_module}), \
+                        patch.object(gate.os, 'getuid', return_value=501, create=True) as getuid, \
+                        patch.object(gate.sys, 'platform', 'darwin'), \
+                        patch.object(gate, 'row_for_target', return_value=row), \
+                        patch.object(gate, 'check_native'), patch.object(gate, 'private_root', return_value=root), \
+                        patch.dict(os.environ, GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted',
+                                   HOME='/fictional/empty/home', GH_TOKEN='private-value',
+                                   TRACKING_BASELINE_URLS='private-value', PYTHONOPTIMIZE='1'), \
+                        patch.object(gate.subprocess, 'run') as run, redirect_stdout(io.StringIO()):
+                    gate.test()
+                cold, *upgrades = run.call_args_list
+                self.assertEqual(cold.args[0], [sys.executable, str(ROOT / 'candidate/tools/smoke_macos_pkg.py'),
+                                 str(root / 'current/SOFT-Tracking-Setup-3.5.2.pkg'),
+                                 str(root / 'pkg-evidence'), '--require-cold'])
+                getuid.assert_called_once_with()
+                pwd_module.getpwuid.assert_called_once_with(501)
+                self.assertEqual(cold.kwargs['env']['HOME'], console_home)
+                self.assertEqual(cold.kwargs['env']['GITHUB_ACTIONS'], 'true')
+                self.assertEqual(cold.kwargs['env']['RUNNER_ENVIRONMENT'], 'github-hosted')
+                for call in run.call_args_list:
+                    self.assertNotIn('private-value', call.kwargs['env'].values())
+                    self.assertNotIn('PYTHONOPTIMIZE', call.kwargs['env'])
+                    self.assertTrue(call.kwargs['check'])
+                    self.assertEqual(call.kwargs['stderr'], subprocess.STDOUT)
+                    self.assertTrue(Path(call.kwargs['stdout'].name).is_relative_to(root))
+                manual = [call for call in upgrades if Path(call.args[0][1]).name == 'smoke_update.py']
+                automatic = [call for call in upgrades if Path(call.args[0][1]).name == 'smoke_auto_update.py']
+                self.assertEqual([call.args[0][2] for call in manual],
+                                 [str(root / old) for old in gate.upgrade_baselines('3.5.2')])
+                self.assertTrue(all(call.args[0][-1] == '--published' for call in manual))
+                self.assertEqual([call.args[0][2] for call in automatic],
+                                 [str(root / old) for old in ('3.5.1', '3.5.0', '3.4.2')])
+                self.assertTrue(all(call.kwargs['env']['HOME'] == str(root / 'home') for call in upgrades))
+
+    def test_cold_pkg_failure_or_timeout_stops_all_upgrades_and_is_sanitized(self):
+        row = next(row for row in gate.TARGETS if row['target'] == 'macos-arm64-modern')
+        with patch.object(gate, 'VERSION', '3.5.2'):
+            path, _ = self.signed_bundle(row=row, version='3.5.2', engine='sealed-onedir-v1')
+            gate.stage_candidate(path, self.root / 'current', row, self.plan)
+            for error, stage in ((subprocess.CalledProcessError(1, ['private-value']), 'subprocess-failure'),
+                                 (subprocess.TimeoutExpired(['private-value'], 900), 'process-timeout')):
+                output = io.StringIO()
+                pwd_module = Mock()
+                pwd_module.getpwuid.return_value.pw_dir = str(self.root / 'console-home')
+                with self.subTest(stage=stage), patch.object(gate, 'read_plan', return_value=self.plan), \
+                        patch.dict(sys.modules, {'pwd': pwd_module}), \
+                        patch.object(gate.os, 'getuid', return_value=501, create=True) as getuid, \
+                        patch.object(gate.sys, 'platform', 'darwin'), \
+                        patch.object(gate, 'row_for_target', return_value=row), \
+                        patch.object(gate, 'hosted_context'), patch.object(gate, 'check_native'), \
+                        patch.object(gate, 'private_root', return_value=self.root), \
+                        patch.object(gate.sys, 'argv', ['accept_release.py', 'test']), \
+                        patch.object(gate.subprocess, 'run', side_effect=error) as run, redirect_stdout(output):
+                    self.assertEqual(gate.main(), 1)
+                self.assertEqual(run.call_count, 1)
+                getuid.assert_called_once_with()
+                pwd_module.getpwuid.assert_called_once_with(501)
+                self.assertIn('cold-pkg-' + stage + ' FAIL', output.getvalue())
+                self.assertNotIn('private-value', output.getvalue())
 
     def test_candidate_migrator_metadata_and_bytes_are_verified(self):
         def add(files, bad=False):

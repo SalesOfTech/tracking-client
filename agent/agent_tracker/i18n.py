@@ -26,6 +26,62 @@ def select_language(locales=(), region="", override=""):
     return "ru" if primary in ("ru", "be", "kk", "ky", "tg", "hy", "az", "tk") else "en"
 
 
+def _macos_locale():
+    # Use the system framework directly: frozen apps may not bundle a working PyObjC bridge.
+    import ctypes
+
+    cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+    signatures = {
+        "CFLocaleCopyPreferredLanguages": ([], ctypes.c_void_p),
+        "CFArrayGetCount": ([ctypes.c_void_p], ctypes.c_long),
+        "CFArrayGetValueAtIndex": ([ctypes.c_void_p, ctypes.c_long], ctypes.c_void_p),
+        "CFStringGetLength": ([ctypes.c_void_p], ctypes.c_long),
+        "CFStringGetMaximumSizeForEncoding": ([ctypes.c_long, ctypes.c_uint32], ctypes.c_long),
+        "CFStringGetCString": ([ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_uint32], ctypes.c_bool),
+        "CFLocaleCopyCurrent": ([], ctypes.c_void_p),
+        "CFLocaleGetValue": ([ctypes.c_void_p, ctypes.c_void_p], ctypes.c_void_p),
+        "CFRelease": ([ctypes.c_void_p], None),
+    }
+    for name, (arguments, result) in signatures.items():
+        function = getattr(cf, name)
+        function.argtypes, function.restype = arguments, result
+
+    def string(value):
+        if not value:
+            return ""
+        utf8 = 0x08000100
+        size = cf.CFStringGetMaximumSizeForEncoding(cf.CFStringGetLength(value), utf8) + 1
+        if size <= 0:
+            raise ValueError("Invalid native locale string size")
+        buffer = ctypes.create_string_buffer(size)
+        if not cf.CFStringGetCString(value, buffer, size, utf8):
+            raise ValueError("Cannot decode native locale string")
+        return buffer.value.decode("utf-8")
+
+    languages = cf.CFLocaleCopyPreferredLanguages()
+    tags = []
+    if languages:
+        try:
+            tags = [string(cf.CFArrayGetValueAtIndex(languages, index))
+                    for index in range(cf.CFArrayGetCount(languages))]
+            tags = [tag for tag in tags if tag]
+        finally:
+            cf.CFRelease(languages)
+    country = ""
+    # A regional-format lookup failure must not discard a valid UI language.
+    try:
+        current = cf.CFLocaleCopyCurrent()
+        if current:
+            try:
+                key = ctypes.c_void_p.in_dll(cf, "kCFLocaleCountryCode")
+                country = string(cf.CFLocaleGetValue(current, key))
+            finally:
+                cf.CFRelease(current)
+    except (AttributeError, OSError, ValueError):
+        pass
+    return tags, country
+
+
 def system_locale():
     try:
         if os.name == "nt":
@@ -46,8 +102,20 @@ def system_locale():
                 pass
             return tags, country.value
         if sys.platform == "darwin":
+            try:
+                tags, region = _macos_locale()
+                if tags:
+                    return tags, region
+            except (ImportError, AttributeError, OSError, ValueError):
+                pass
             from Foundation import NSLocale
-            return list(NSLocale.preferredLanguages()), str(NSLocale.currentLocale().countryCode() or "")
+            tags = list(NSLocale.preferredLanguages())
+            if tags:
+                try:
+                    region = str(NSLocale.currentLocale().countryCode() or "")
+                except (AttributeError, OSError, ValueError):
+                    region = ""
+                return tags, region
     except (ImportError, AttributeError, OSError, ValueError):
         pass
     # LC_ALL overrides LC_MESSAGES and LANG; a regional locale is preferable to IP inference.
@@ -64,6 +132,11 @@ def detect_language(override=""):
     if override in LANGUAGES:
         return override
     tags, region = system_locale()
+    if sys.platform == "darwin" and tags:
+        # A supported macOS UI language, including English, wins over regional formats.
+        primary = re.split(r"[-_.@]", str(tags[0]))[0].lower()
+        if primary in LANGUAGES:
+            return primary
     return select_language(tags, region, override)
 
 

@@ -10,7 +10,7 @@ import time
 import uuid
 
 import psutil
-from macos_pkg import IDENTIFIER
+from macos_pkg import package_identifier
 
 
 def run(*args, timeout=120, check=True):
@@ -56,14 +56,15 @@ def processes_with_argument(argument):
 
 
 def check(package, evidence, require_cold=False):
-    if platform.system() != 'Darwin' or platform.machine() != 'arm64' or os.geteuid() == 0:
-        raise RuntimeError('Requires an isolated native ARM runner user')
+    if platform.system() != 'Darwin' or platform.machine() not in ('arm64', 'x86_64') or os.geteuid() == 0:
+        raise RuntimeError('Requires an isolated native macOS runner user')
+    identifier = package_identifier('arm64' if platform.machine() == 'arm64' else 'x64')
     if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted':
         raise RuntimeError('Do not install test packages on a developer or customer machine')
     console_uid = int(run('stat', '-f', '%u', '/dev/console').stdout.strip())
     if console_uid != os.getuid() or installer_processes():
         raise RuntimeError('Expected the runner console user and no other Installer session')
-    if run('pkgutil', '--pkg-info', IDENTIFIER, check=False).returncode == 0:
+    if run('pkgutil', '--pkg-info', identifier, check=False).returncode == 0:
         raise RuntimeError('Preexisting pilot receipt; refusing to replace it')
     evidence.mkdir(parents=True, exist_ok=True)
     temp = Path(run('getconf', 'DARWIN_USER_TEMP_DIR').stdout.strip()).resolve()
@@ -188,7 +189,7 @@ def check(package, evidence, require_cold=False):
                     path.unlink()
             if not list(cache.iterdir()):
                 cache.rmdir()
-        run('sudo', '-n', 'pkgutil', '--forget', IDENTIFIER, check=False)
+        run('sudo', '-n', 'pkgutil', '--forget', identifier, check=False)
 
 
 if __name__ == '__main__':

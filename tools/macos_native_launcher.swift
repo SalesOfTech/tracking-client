@@ -3,11 +3,11 @@ import CryptoKit
 import AppKit
 import Darwin
 
-#if !os(macOS) || !arch(arm64)
-#error("The native packaging pilot requires arm64 macOS.")
+#if !os(macOS) || (!arch(arm64) && !arch(x86_64))
+#error("The native packaging requires arm64 or x86_64 macOS.")
 #endif
 
-// The builder replaces these literals before compiling for arm64-apple-macos13.0.
+// The builder replaces these literals before compiling for the native macOS target.
 private let engineSHA256 = "@@ENGINE_SHA256@@"
 private let engineName = "@@ENGINE_NAME@@"
 private let appName = "SOFT Tracking Engine.app"

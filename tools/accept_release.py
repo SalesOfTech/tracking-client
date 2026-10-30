@@ -24,6 +24,7 @@ import requests
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 from ci import TARGETS, upgrade_baselines
+from delivery import installer_filename
 from smoke_published import stage_published_archive
 from agent_tracker.core.files import atomic_json
 from agent_tracker.core.target import runtime_target
@@ -35,7 +36,7 @@ ENVIRONMENT = 'tracking-release-acceptance'
 SMOKE_STEP = 'All genuine published upgrades with all existing smoke assertions'
 MAX_BUNDLE = 2 * 1024 ** 3 - 1
 ASSET_HOST = 'release-assets.githubusercontent.com'
-PUBLIC_BASELINES = frozenset({'3.5.0', '3.4.2', '3.4.0', '3.3.2', '3.3.0', '3.2.0'})
+PUBLIC_BASELINES = frozenset({'3.5.1', '3.5.0', '3.4.2', '3.4.0', '3.3.2', '3.3.0', '3.2.0'})
 STAGE = 'preflight'
 
 
@@ -393,12 +394,15 @@ def bounded_member(archive, name):
 def stage_candidate(path, destination, row, plan):
     build = {'os': row['target'].split('-')[0], 'architecture': row['arch']}
     prefix = row['target'] + '/'
-    installer = 'SOFT-Tracking-Setup-' + VERSION + {'windows': '.exe', 'macos': '.dmg', 'linux': '.run'}[build['os']]
-    expected = {prefix + name for name in ('manifest.json', 'release-' + VERSION + '.zip',
-                'provenance.json', 'setup.json', 'dependencies.txt', 'size-report.json', installer)}
-    if row['ui'] == 'electron':
-        expected.add(prefix + 'desktop-package-lock.json')
     with zipfile.ZipFile(path) as archive:
+        provenance = bounded_member(archive, prefix + 'provenance.json')
+        require(isinstance(provenance.get('build'), dict) and
+                provenance['build'].get('os') == build['os'])
+        installer = installer_filename(VERSION, provenance['build'])
+        expected = {prefix + name for name in ('manifest.json', 'release-' + VERSION + '.zip',
+                    'provenance.json', 'setup.json', 'dependencies.txt', 'size-report.json', installer)}
+        if row['ui'] == 'electron':
+            expected.add(prefix + 'desktop-package-lock.json')
         entries = archive.infolist()
         require(sum(info.file_size for info in entries) <= MAX_BUNDLE)
         if prefix + 'migration.json' in archive.namelist():
@@ -419,6 +423,7 @@ def stage_candidate(path, destination, row, plan):
                     and info.file_size <= MAX_BUNDLE for info in entries))
     manifest = stage_published_archive(path, destination / 'setup-payload', VERSION, row['target'], plan['trusted_keys'], build)
     require(manifest.get('ui') == row['ui'] and manifest.get('launcher_protocol') == 1)
+    require(installer_filename(VERSION, manifest) == installer)
     with zipfile.ZipFile(path) as archive:
         provenance = bounded_member(archive, prefix + 'provenance.json')
         require(set(provenance) == {'version', 'target', 'commit', 'run_url', 'build'})
@@ -430,6 +435,7 @@ def stage_candidate(path, destination, row, plan):
                 all(manifest.get(key) == value for key, value in provenance['build'].items()))
         setup = bounded_member(archive, prefix + 'setup.json')
         require(setup['version'] == VERSION and setup['target'] == row['target'] and setup.get('ui') == row['ui'])
+        require(setup.get('macos_engine') == manifest.get('macos_engine') == provenance['build'].get('macos_engine'))
         require(setup['file'] == installer)
         checksum = hashlib.sha256()
         with archive.open(prefix + installer) as stream:
@@ -439,6 +445,10 @@ def stage_candidate(path, destination, row, plan):
     release = destination / 'setup-payload/release.zip'
     with zipfile.ZipFile(release) as archive:
         require(bounded_member(archive, 'build.json') == provenance['build'])
+    if installer.endswith('.pkg'):
+        with zipfile.ZipFile(path) as archive, (destination / installer).open('xb') as output:
+            with archive.open(prefix + installer) as source:
+                shutil.copyfileobj(source, output, 1024 * 1024)
     shutil.copyfile(release, destination / ('release-' + VERSION + '.zip'))
     shutil.copyfile(destination / 'setup-payload/manifest.json', destination / 'manifest.json')
     return manifest
@@ -526,6 +536,32 @@ def test():
     check_native(row, plan)
     root = private_root()
     env = smoke_environment(root)
+    if row['target'].startswith('macos-') and tuple(map(int, VERSION.split('.'))) >= (3, 5, 2):
+        build = json_value((root / 'current/setup-payload/setup-build.json').read_bytes())
+        installer = installer_filename(VERSION, build)
+        if installer.endswith('.pkg'):
+            import pwd
+            STAGE = 'cold-pkg'
+            package = root / 'current' / installer
+            require(package.is_file() and not package.is_symlink())
+            # PKG launches as the console user, outside the isolated upgrade HOME.
+            # Check that user's real cache, never an artificially empty test home.
+            pkg_env = dict(env, HOME=pwd.getpwuid(os.getuid()).pw_dir)
+            for name in ('GITHUB_ACTIONS', 'RUNNER_ENVIRONMENT'):
+                pkg_env[name] = os.environ.get(name, '')
+            try:
+                with (root / 'cold-pkg.private.log').open('wb') as log:
+                    subprocess.run([sys.executable, str(ROOT / 'candidate/tools/smoke_macos_pkg.py'),
+                                    str(package), str(root / 'pkg-evidence'), '--require-cold'],
+                                   env=pkg_env, cwd=root, stdin=subprocess.DEVNULL,
+                                   stdout=log, stderr=subprocess.STDOUT, timeout=900, check=True)
+            except subprocess.CalledProcessError:
+                STAGE += '-subprocess-failure'
+                raise
+            except subprocess.TimeoutExpired:
+                STAGE += '-process-timeout'
+                raise
+            print(row['target'] + ' cold PKG PASS', flush=True)
     for old in upgrade_baselines(VERSION):
         STAGE = 'upgrade-' + old
         path = root / (old + '.private.log')
@@ -542,7 +578,7 @@ def test():
             STAGE += '-process-timeout'
             raise
         print(row['target'] + ' ' + old + ' PASS', flush=True)
-        if '3.5.0' in upgrade_baselines(VERSION) and old in {'3.5.0', '3.4.2'}:
+        if '3.5.0' in upgrade_baselines(VERSION) and old in {'3.5.1', '3.5.0', '3.4.2'}:
             STAGE = 'automatic-update-' + old
             path = root / (old + '.automatic.private.log')
             try:

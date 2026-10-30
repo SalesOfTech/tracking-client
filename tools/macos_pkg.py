@@ -1,8 +1,9 @@
-"""Repackage the pinned ARM pilot as a single Apple Installer document."""
+"""Repackage a sealed native macOS app as a single Apple Installer document."""
 import argparse
 import hashlib
 from pathlib import Path
 import platform
+import re
 import shutil
 import subprocess
 import tempfile
@@ -20,20 +21,30 @@ def run(*args):
     subprocess.run([str(arg) for arg in args], check=True, timeout=180)
 
 
-def distribution():
+def package_identifier(architecture):
+    if architecture not in ('arm64', 'x64'):
+        raise ValueError('Unsupported macOS architecture')
+    return IDENTIFIER if architecture == 'arm64' else 'com.soft.tracking.setup.intel'
+
+
+def distribution(version='3.5.2', architecture='arm64'):
+    identifier = package_identifier(architecture)
+    if not re.fullmatch(r'\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?', version):
+        raise ValueError('Invalid package version')
+    package_version = version.split('-')[0]
     document = ET.Element('installer-gui-script', {'minSpecVersion': '2'})
     ET.SubElement(document, 'title').text = 'SOFT Tracking Setup'
     ET.SubElement(document, 'welcome', {'file': 'welcome.html'})
     ET.SubElement(document, 'conclusion', {'file': 'conclusion.html'})
     ET.SubElement(document, 'options', {'customize': 'never', 'require-scripts': 'true',
-                                      'rootVolumeOnly': 'true', 'hostArchitectures': 'arm64'})
+                                      'rootVolumeOnly': 'true', 'hostArchitectures': 'arm64' if architecture == 'arm64' else 'x86_64'})
     ET.SubElement(document, 'domains', {'enable_localSystem': 'true',
                                       'enable_currentUserHome': 'false', 'enable_anywhere': 'false'})
     ET.SubElement(ET.SubElement(document, 'allowed-os-versions'), 'os-version', {'min': '13.0'})
     ET.SubElement(ET.SubElement(document, 'choices-outline'), 'line', {'choice': 'setup'})
     choice = ET.SubElement(document, 'choice', {'id': 'setup', 'visible': 'false'})
-    ET.SubElement(choice, 'pkg-ref', {'id': IDENTIFIER})
-    reference = ET.SubElement(document, 'pkg-ref', {'id': IDENTIFIER, 'version': '3.5.2', 'auth': 'Root'})
+    ET.SubElement(choice, 'pkg-ref', {'id': identifier})
+    reference = ET.SubElement(document, 'pkg-ref', {'id': identifier, 'version': package_version, 'auth': 'Root'})
     reference.text = 'component.pkg'
     return ET.tostring(document, encoding='utf-8', xml_declaration=True)
 
@@ -78,11 +89,19 @@ def instructions(resources):
             (folder / name).write_bytes(ET.tostring(page, encoding='utf-8', method='html'))
 
 
-def build(output, source_image=None):
-    from release import require_github_runner
+def build(output, source_image=None, *, version='3.5.2', architecture='arm64'):
+    if __package__:
+        from .release import require_github_runner
+    else:
+        from release import require_github_runner
     require_github_runner()
-    if platform.system() != 'Darwin' or platform.machine() != 'arm64':
-        raise RuntimeError('Native Apple Silicon runner required')
+    specification = distribution(version, architecture)
+    identifier = package_identifier(architecture)
+    native_arch = 'arm64' if architecture == 'arm64' else 'x86_64'
+    if platform.system() != 'Darwin' or platform.machine() != native_arch:
+        raise RuntimeError('Matching native macOS runner required')
+    if source_image is None and architecture != 'arm64':
+        raise ValueError('Intel package requires a locally built Intel image')
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='soft-pkg-build-') as temporary:
         work = Path(temporary)
@@ -119,25 +138,28 @@ def build(output, source_image=None):
                 script.chmod(0o755)
             run('ditto', app, scripts / app.name)
             component = work / 'component.pkg'
-            run('pkgbuild', '--nopayload', '--scripts', scripts, '--identifier', IDENTIFIER,
-                '--version', '3.5.2', component)
+            run('pkgbuild', '--nopayload', '--scripts', scripts, '--identifier', identifier,
+                '--version', version.split('-')[0], component)
             spec = work / 'distribution.xml'
-            spec.write_bytes(distribution())
+            spec.write_bytes(specification)
             resources = work / 'resources'
             instructions(resources)
-            package = output / PACKAGE_NAME
+            package = output / (PACKAGE_NAME if architecture == 'arm64' else 'SOFT-Tracking-Setup-Intel.pkg')
             run('productbuild', '--distribution', spec, '--resources', resources,
                 '--package-path', work, package)
             checksum = hashlib.sha256(package.read_bytes()).hexdigest()
             package.with_suffix('.pkg.sha256').write_text(checksum + '  ' + package.name + '\n', encoding='ascii')
         finally:
             run('hdiutil', 'detach', mount)
-    print('Built single unsigned ARM PKG. Apple trust approval may still be required. No release/feed changed.')
+    print('Built single unsigned ' + architecture + ' PKG. Apple trust approval may still be required. No release/feed changed.')
+    return package
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path)
     parser.add_argument('--image', type=Path, help='Use the verified DMG built in this same ARM workflow')
+    parser.add_argument('--version', default='3.5.2')
+    parser.add_argument('--architecture', choices=('arm64', 'x64'), default='arm64')
     args = parser.parse_args()
-    build(args.output.resolve(), args.image)
+    build(args.output.resolve(), args.image, version=args.version, architecture=args.architecture)

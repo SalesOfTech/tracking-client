@@ -1,4 +1,4 @@
-"""ARM-only pilot: sealed onedir engine, native entry points, administrator fallback."""
+"""Sealed macOS onedir engine, native entry points and administrator preparation."""
 import hashlib
 from pathlib import Path
 import plistlib
@@ -14,7 +14,14 @@ def command(*args):
     subprocess.run([str(arg) for arg in args], check=True)
 
 
-def engine_spec():
+def native_architecture(architecture):
+    if architecture not in ('arm64', 'x64'):
+        raise ValueError('Unsupported macOS architecture')
+    return 'x86_64' if architecture == 'x64' else architecture
+
+
+def engine_spec(architecture='arm64'):
+    target = native_architecture(architecture)
     excludes = ['PySide2', 'PySide6', 'PyQt5', 'PyQt6', 'shiboken2', 'shiboken6',
                 'agent_tracker.qt_desktop', 'agent_tracker.ui.quick', 'tkinter', '_tkinter']
     hidden = ['_cffi_backend', 'agent_tracker.platform.macos', 'runtime_entry', 'native_entry',
@@ -26,18 +33,20 @@ def engine_spec():
         ' hiddenimports=' + repr(hidden) + ', excludes=' + repr(excludes) + ')',
         'pyz = PYZ(a.pure)',
         "exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='soft-tracking-engine',",
-        " console=True, strip=False, upx=False, target_arch='arm64', codesign_identity='-')",
+        " console=True, strip=False, upx=False, target_arch=" + repr(target) + ", codesign_identity='-')",
         "coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='engine')",
         'app = BUNDLE(coll, name=' + repr(APP) + ', icon=' +
         repr(str(ROOT/'agent/agent_tracker/assets/app_light.icns')) + ',',
         " bundle_identifier='com.soft.tracking.engine',",
-        " info_plist={'LSMinimumSystemVersion': '13.0', 'LSUIElement': True})",
+        " info_plist={'LSMinimumSystemVersion': '13.0', 'LSUIElement': True,",
+        " 'CFBundleDevelopmentRegion': 'en', 'CFBundleLocalizations': ['ru', 'en', 'cs', 'uz']})",
     ]) + '\n'
 
 
-def build_engine(out, work, payload):
+def build_engine(out, work, payload, architecture='arm64'):
+    target = native_architecture(architecture)
     spec = work/'macos-engine.spec'
-    spec.write_text(engine_spec(), encoding='utf-8')
+    spec.write_text(engine_spec(architecture), encoding='utf-8')
     dist = out/'engine-dist'
     command(sys.executable, '-m', 'PyInstaller', '--noconfirm', '--distpath', dist,
             '--workpath', work/'engine', spec)
@@ -63,7 +72,7 @@ def build_engine(out, work, payload):
     swift = work/'macos-launcher.swift'
     swift.write_text(source, encoding='utf-8')
     wrapper = out/'native-launcher'
-    command('/usr/bin/xcrun', 'swiftc', '-O', '-target', 'arm64-apple-macos13.0',
+    command('/usr/bin/xcrun', 'swiftc', '-O', '-target', target + '-apple-macos13.0',
             '-o', wrapper, swift)
     command('/usr/bin/codesign', '--force', '--sign', '-', wrapper)
     for folder, names in [('app', ['soft-tracking-app', 'soft-tracking-host-app']),
@@ -94,6 +103,7 @@ def build_setup(out, setup, archive, wrapper, version):
             'CFBundleName': 'SOFT Tracking Setup', 'CFBundleDisplayName': 'SOFT Tracking Setup',
             'CFBundlePackageType': 'APPL', 'CFBundleIconFile': 'app_light.icns',
             'CFBundleShortVersionString': version.split('-')[0], 'CFBundleVersion': version.split('-')[0],
+            'CFBundleDevelopmentRegion': 'en', 'CFBundleLocalizations': ['ru', 'en', 'cs', 'uz'],
             'LSMinimumSystemVersion': '13.0', 'NSHighResolutionCapable': True}
     (contents/'Info.plist').write_bytes(plistlib.dumps(info))
     command('/usr/bin/codesign', '--force', '--sign', '-', app)

@@ -410,7 +410,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(before, {path.name: path.read_bytes() for path in root.iterdir() if path.is_file()})
         self.assertEqual(list(root.glob('.bootstrap-*')), [])
 
-    def test_macos_manual_engine_upgrade_promotes_bootstrap_only_after_health(self):
+    def test_macos_manual_engine_upgrade_preserves_original_bootstrap_and_sidecar(self):
         from agent_tracker import installer
         with patch.object(installer.sys, 'platform', 'darwin'):
             bundle, root = self.installer_fixture(engine=b'first engine fixture')
@@ -435,10 +435,10 @@ class ReleaseTests(unittest.TestCase):
             self.assertFalse((root / archive_name).exists())
             install(bundle, root, 'a'*32, integrate=False, health_check=check)
         self.assertEqual(read_json(root / 'current.json')['version'], '3.0.2')
-        self.assertEqual((root / archive_name).read_bytes(), engine)
+        self.assertFalse((root / archive_name).exists())
+        self.assertEqual((root / 'versions/3.0.2/launcher' / archive_name).read_bytes(), engine)
         for name in wrappers:
-            self.assertEqual((root / name).read_bytes(), (root / 'versions/3.0.2/launcher' / name).read_bytes())
-            self.assertNotEqual((root / name).read_bytes(), before[name])
+            self.assertEqual((root / name).read_bytes(), before[name])
 
     def test_engine_sidecars_do_not_change_non_macos_bootstrap_behavior(self):
         from agent_tracker import installer

@@ -22,6 +22,16 @@ def digest(path):
     return h.hexdigest()
 
 
+def installer_filename(version, build):
+    if not re.fullmatch(r'\d+\.\d+\.\d+', version):
+        raise ValueError('Invalid installer version')
+    extension = {'windows': 'exe', 'macos': 'dmg', 'linux': 'run'}[build['os']]
+    if (build['os'] == 'macos' and build.get('macos_engine') == 'sealed-onedir-v1'
+            and tuple(map(int, version.split('.'))) >= (3, 5, 2)):
+        extension = 'pkg'
+    return 'SOFT-Tracking-Setup-' + version + '.' + extension
+
+
 def export(archive, destination, version):
     target = archive.name.removeprefix('SOFT-Tracking-').removesuffix('-' + version + '.zip')
     if not re.fullmatch(r'(windows|linux|macos)-(x64|x86|arm64)-(modern|legacy)', target):
@@ -36,7 +46,9 @@ def export(archive, destination, version):
         manifest = json.loads(base64.b64decode(signed['payload'], validate=True))
         if setup['target'] != target or setup['version'] != version or manifest['target'] != target or manifest['version'] != version:
             raise ValueError('Mismatched release')
-        if not re.fullmatch(r'SOFT-Tracking-Setup-[0-9.]+\.(exe|dmg|run)', setup['file']):
+        if (manifest.get('os') != target.split('-')[0] or
+                setup.get('macos_engine') != manifest.get('macos_engine') or
+                setup['file'] != installer_filename(version, manifest)):
             raise ValueError('Invalid installer')
         output = []
         artifacts = [(setup['file'], setup['sha256']), ('release-' + version + '.zip', manifest['sha256'])]

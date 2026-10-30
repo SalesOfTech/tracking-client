@@ -65,11 +65,17 @@ def build_plan(args):
     pilot = os.environ.get('SOFT_TRACKING_MACOS_PILOT') == '1'
     if pilot and (target != 'macos-arm64-modern' or '-rc.' not in args.version):
         raise ValueError('Native macOS pilot requires an ARM modern prerelease')
+    sealed = pilot or (os_name == 'macos' and arch in ('x64', 'arm64') and args.profile == 'modern' and
+                       tuple(map(int, args.version.split('-')[0].split('.'))) >= (3, 5, 2))
+    metadata = {'build_channel': 'local-test'} if local_test else {}
+    if sealed:
+        metadata['macos_engine'] = 'sealed-onedir-v1'
+    if pilot:
+        metadata['build_channel'] = 'macos-arm-pilot'
     root = ROOT / 'artifacts' / 'local-test' if local_test else ROOT / 'artifacts'
     return dict(os=os_name, architecture=arch, target=target, ui=ui_for_profile(os_name, arch, args.profile),
                 local_test=local_test, output=root / target / args.version,
-                metadata=({'build_channel': 'macos-arm-pilot', 'macos_engine': 'sealed-onedir-v1'} if pilot
-                          else {'build_channel': 'local-test'} if local_test else {}))
+                metadata=metadata)
 
 
 def ui_for_profile(os_name, arch, profile):
@@ -344,7 +350,7 @@ def build(args):
             from .macos_pilot import build_engine, build_setup
         else:
             from macos_pilot import build_engine, build_setup
-        engine_archive, native_wrapper = build_engine(out, work, payload)
+        engine_archive, native_wrapper = build_engine(out, work, payload, architecture=arch)
     else:
         freeze('runtime_entry.py', app_name, out/'runtime-dist', work,
                [(ROOT/'agent/agent_tracker/assets','agent_tracker/assets')], ui=ui)
@@ -439,6 +445,15 @@ def build(args):
             verify_frozen(bundle / 'Contents/MacOS/SOFT-Tracking-Setup', bundle)
         installer=out / "SOFT-Tracking-Setup.dmg"
         create_macos_image(image_source if pilot else bundle, installer)
+        if pilot and plan['metadata'].get('build_channel') != 'macos-arm-pilot':
+            if __package__:
+                from .macos_pkg import build as build_pkg
+            else:
+                from macos_pkg import build as build_pkg
+            package = build_pkg(out, installer, version=args.version, architecture=arch)
+            installer = out / 'SOFT-Tracking-Setup.pkg'
+            package.rename(installer)
+            package.with_suffix('.pkg.sha256').unlink()
     elif os_name=="windows": installer=out / "SOFT-Tracking-Setup.exe"
     else:
         installer=out / "SOFT-Tracking-Setup.run"

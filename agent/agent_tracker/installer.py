@@ -235,7 +235,8 @@ def upgrade_existing(bundle,root,language='',integrate=True,health_check=None):
             if manifest['target']!=build['target']:
                 raise InstallerError('setup_wrong_target')
             # Re-running setup also repairs login startup for existing installs.
-            # Bootstrap promotion follows successful health, never a failed candidate.
+            # Same-version setup may repair its bootstrap. Upgrades retain the
+            # original launcher, which selects the active version's own runtime.
             if integrate:
                 autostart(launcher, True)
             if Version(manifest['version'])<=Version(active['version']):
@@ -253,7 +254,6 @@ def upgrade_existing(bundle,root,language='',integrate=True,health_check=None):
                 except Exception as error:
                     manager.rollback()
                     raise InstallerError('setup_upgrade_failed') from error
-                copy_bootstrap_files(release_path(root, manifest['version']), root, refresh=True)
                 if language in LANGUAGES:
                     profile=read_json(root/'enrollment.json',{})
                     profile.update(language=language,language_source='manual')
